@@ -13,7 +13,9 @@ revnix-kotlin 0.1.0, and revnix_flutter 0.1.0.
   read-your-writes `WaitForEntitlements(seq)`
 - Purchases: `RegisterPurchase` with durable PlayerPrefs retry queue
   (`RetryPendingPurchases`, `PendingPurchaseCount`), canonical-id adoption
-- Placements: `ResolvePlacement` with offline fallback; `LogPaywallShown`,
+- Placements: `ResolvePlacement` with offline fallback; typed remote paywall
+  contract (`PlacementPaywall`/`PaywallConfig` — 9 layout templates, mode,
+  review + offer blocks, footer links); `LogPaywallShown`,
   `RegisterInstall` beacons
 - Typed error taxonomy (`RevnixException` subclasses), retryable vs
   deliberate, `Retry-After` support

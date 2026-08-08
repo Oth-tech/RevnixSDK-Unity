@@ -15,8 +15,9 @@ and `revnix_flutter`, ported to C#:
   the purchase key).
 - **Read-your-writes** — `WaitForEntitlements(seq)` polls until the ledger
   reflects the purchase, so the unlock is immediate, not eventually.
-- **Placements** — `ResolvePlacement` returns the offering + remote paywall
-  config, with an offline fallback to the last resolution.
+- **Placements** — `ResolvePlacement` returns the offering + typed remote
+  paywall config (layout template, copy, review/offer blocks), with an
+  offline fallback to the last resolution.
 - **Optional Unity IAP bridge** — auto-detected via version defines; maps a
   purchased `Product` straight to a registration.
 

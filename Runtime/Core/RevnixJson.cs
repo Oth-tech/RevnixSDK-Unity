@@ -66,6 +66,14 @@ namespace Revnix
             return null;
         }
 
+        public static double? GetNullableDouble(Dictionary<string, object> map, string key)
+        {
+            if (map == null || !map.TryGetValue(key, out var v)) return null;
+            if (v is double d) return d;
+            if (v is long l) return l;
+            return null;
+        }
+
         public static List<object> GetList(Dictionary<string, object> map, string key)
             => map != null && map.TryGetValue(key, out var v) && v is List<object> list
                 ? list

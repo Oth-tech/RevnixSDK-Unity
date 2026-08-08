@@ -1,0 +1,23 @@
+{
+    "name": "Revnix.Sdk.UnityIAP",
+    "rootNamespace": "Revnix.Unity.IAP",
+    "references": [
+        "Revnix.Sdk",
+        "UnityEngine.Purchasing"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.purchasing",
+            "expression": "4.0.0",
+            "define": "REVNIX_UNITY_IAP"
+        }
+    ],
+    "noEngineReferences": false
+}

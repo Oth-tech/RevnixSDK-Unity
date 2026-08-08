@@ -1,0 +1,29 @@
+{
+  "name": "com.revnix.sdk",
+  "version": "0.1.0",
+  "displayName": "Revnix",
+  "description": "Revnix subscriptions and entitlements for Unity — offline-resilient entitlement checks, placements, purchase registration with a durable retry queue, and an optional Unity IAP bridge.",
+  "unity": "2021.3",
+  "documentationUrl": "https://revnix.io/docs",
+  "changelogUrl": "https://github.com/Oth-tech/RevnixSDK-Unity/blob/main/CHANGELOG.md",
+  "licensesUrl": "https://github.com/Oth-tech/RevnixSDK-Unity/blob/main/LICENSE.md",
+  "keywords": [
+    "revnix",
+    "subscriptions",
+    "iap",
+    "entitlements",
+    "paywall"
+  ],
+  "author": {
+    "name": "Revnix",
+    "email": "support@revnix.io",
+    "url": "https://revnix.io"
+  },
+  "samples": [
+    {
+      "displayName": "Quick Start",
+      "description": "Configure the SDK, gate a feature, resolve a placement, and register a purchase.",
+      "path": "Samples~/QuickStart"
+    }
+  ]
+}

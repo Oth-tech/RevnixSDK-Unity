@@ -1,0 +1,5 @@
+# OS/editor noise only — everything in the package ships.
+.DS_Store
+*.csproj
+obj/
+bin/

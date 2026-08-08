@@ -1,0 +1,72 @@
+# Revnix Unity SDK (`com.revnix.sdk`)
+
+[Revnix](https://revnix.io) subscriptions and entitlements for Unity —
+the same client contract as `revnix-react`, `revnix-swift`, `revnix-kotlin`,
+and `revnix_flutter`, ported to C#:
+
+- **Offline-resilient entitlements** — network-first reads; transient
+  failures serve the cached snapshot flagged `Stale`, deliberate rejections
+  (401/403/404/409) always throw, so a kill-switch can never be defeated by a
+  cache. Clock-rollback detection, 3-day expiry grace, 14-day cache ceiling.
+- **One fetch per screen** — soft TTL + in-flight coalescing; a screen full
+  of `IsEntitled` gates costs one request.
+- **Durable purchase registration** — failed registrations queue in
+  PlayerPrefs and drain idempotently on every launch (the server dedupes on
+  the purchase key).
+- **Read-your-writes** — `WaitForEntitlements(seq)` polls until the ledger
+  reflects the purchase, so the unlock is immediate, not eventually.
+- **Placements** — `ResolvePlacement` returns the offering + remote paywall
+  config, with an offline fallback to the last resolution.
+- **Optional Unity IAP bridge** — auto-detected via version defines; maps a
+  purchased `Product` straight to a registration.
+
+## Install
+
+Package Manager → *Add package from git URL*:
+
+```
+https://github.com/Oth-tech/RevnixSDK-Unity.git
+```
+
+(or add `"com.revnix.sdk": "https://github.com/Oth-tech/RevnixSDK-Unity.git"`
+to `Packages/manifest.json`.)
+
+## Quick start
+
+```csharp
+using Revnix;
+using Revnix.Unity;
+
+var revnix = RevnixSdk.Configure(
+    "rvx_pk_live_…",                      // publishable key only — never rvx_sk_
+    "https://your-deployment.convex.site");
+
+// Gate. Never throws; unknown or unreachable means locked.
+if (await revnix.IsEntitled("pro")) { /* … */ }
+
+// Paywall
+var placement = await revnix.ResolvePlacement("main_paywall");
+await revnix.LogPaywallShown(placementKey: "main_paywall");
+
+// With Unity IAP (com.unity.purchasing in the project):
+var result = await RevnixUnityIap.Register(revnix, purchasedProduct);
+if (result != null) await revnix.WaitForEntitlements(result.Seq);
+```
+
+`Configure` also drains the purchase retry queue and reports the install —
+both idempotent, both off the critical path.
+
+## Design notes
+
+- The resilience policy is a **product contract** shared by every Revnix SDK;
+  `revnix-sdk`'s `resilience.test.ts` is the behavioral spec. Don't "fix"
+  policy here — change the spec first.
+- The core (`Runtime/Core`) is engine-free C# with injected transport,
+  storage, and clock — it compiles against .NET and is verified off-device.
+  Unity specifics live in `Runtime/Unity` (UnityWebRequest, PlayerPrefs).
+- Purchases are **claims**: Google purchase tokens and Apple transaction ids
+  register without device-side proof and land `Provisional` until the server
+  corroborates with the store (RTDN / App Store Server API). Nothing about
+  that is Unity-specific — it is how the platform works.
+- Main thread: call the SDK from the main thread (UnityWebRequest's
+  requirement). Awaited continuations resume on Unity's SynchronizationContext.

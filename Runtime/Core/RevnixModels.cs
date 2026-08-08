@@ -267,6 +267,166 @@ namespace Revnix
         }
     }
 
+    /// <summary>One feature row on the paywall.</summary>
+    public sealed class PaywallFeature
+    {
+        /// <summary>Icon name/emoji chosen in the dashboard; null = layout default.</summary>
+        public string Icon;
+
+        public string Title;
+        public string Description;
+
+        public static PaywallFeature FromJson(Dictionary<string, object> map) => new PaywallFeature
+        {
+            Icon = RevnixJson.GetString(map, "icon"),
+            Title = RevnixJson.GetString(map, "title", ""),
+            Description = RevnixJson.GetString(map, "description"),
+        };
+    }
+
+    /// <summary>Social proof, dashboard-configured. Any layout renders the
+    /// pieces that are set: stars/quote card above the packages, `Count`
+    /// under the CTA.</summary>
+    public sealed class PaywallReview
+    {
+        /// <summary>0–5; rendered as a star row. Null = no star row.</summary>
+        public double? Rating;
+
+        public string Quote;
+        public string Author;
+
+        /// <summary>e.g. "Join 2M+ users" — small line under the CTA.</summary>
+        public string Count;
+
+        public static PaywallReview FromJson(Dictionary<string, object> map) => new PaywallReview
+        {
+            Rating = RevnixJson.GetNullableDouble(map, "rating"),
+            Quote = RevnixJson.GetString(map, "quote"),
+            Author = RevnixJson.GetString(map, "author"),
+            Count = RevnixJson.GetString(map, "count"),
+        };
+    }
+
+    /// <summary>Win-back/offer presentation: anchor price struck through on the
+    /// highlighted package, urgency line above the CTA. Any layout.</summary>
+    public sealed class PaywallOffer
+    {
+        public string StrikethroughPrice;
+        public string UrgencyText;
+
+        public static PaywallOffer FromJson(Dictionary<string, object> map) => new PaywallOffer
+        {
+            StrikethroughPrice = RevnixJson.GetString(map, "strikethroughPrice"),
+            UrgencyText = RevnixJson.GetString(map, "urgencyText"),
+        };
+    }
+
+    /// <summary>Footer links, dashboard-configured. A null footer on the config
+    /// (legacy) means show all three. When a URL is set the app should open it
+    /// directly; otherwise run its own terms/privacy handler.</summary>
+    public sealed class PaywallFooter
+    {
+        public bool ShowRestore;
+        public bool ShowTerms;
+        public bool ShowPrivacy;
+        public string TermsUrl;
+        public string PrivacyUrl;
+
+        public static PaywallFooter FromJson(Dictionary<string, object> map) => new PaywallFooter
+        {
+            ShowRestore = RevnixJson.GetBool(map, "showRestore", true),
+            ShowTerms = RevnixJson.GetBool(map, "showTerms", true),
+            ShowPrivacy = RevnixJson.GetBool(map, "showPrivacy", true),
+            TermsUrl = RevnixJson.GetString(map, "termsUrl"),
+            PrivacyUrl = RevnixJson.GetString(map, "privacyUrl"),
+        };
+    }
+
+    /// <summary>Remote paywall render contract — the app draws this with its
+    /// own components; prices still come from the store (StoreKit / Play
+    /// Billing) so the display never disagrees with the charge.</summary>
+    public sealed class PaywallConfig
+    {
+        /// <summary>Layout — the screen structure to render. Known values:
+        /// "focus", "feature-list", "minimal", "hero", "timeline", "plans",
+        /// "feature-grid", "offer", "reveal". The dashboard's template gallery
+        /// is presets over these layouts. Kept as a plain string so configs
+        /// published by a newer dashboard never fail to parse — treat an
+        /// unknown value as "focus".</summary>
+        public string Template;
+
+        /// <summary>Color scheme: "dark" or "light". Null (legacy config) =
+        /// dark.</summary>
+        public string Mode;
+
+        public string Headline;
+        public string Subheadline;
+        public List<PaywallFeature> Features = new List<PaywallFeature>();
+        public string CtaLabel;
+
+        /// <summary>packageId of the visually highlighted package.</summary>
+        public string HighlightPackageId;
+
+        /// <summary>Badge on the highlighted package, e.g. "SAVE 17%".</summary>
+        public string BadgeText;
+
+        /// <summary>Accent hex like "#6478ff"; fall back to the app theme when
+        /// absent.</summary>
+        public string Accent;
+
+        /// <summary>Hero image URL rendered above the headline in place of the
+        /// icon tile.</summary>
+        public string HeroImageUrl;
+
+        public PaywallReview Review;
+        public PaywallOffer Offer;
+
+        /// <summary>Null (legacy config) = show restore/terms/privacy.</summary>
+        public PaywallFooter Footer;
+
+        public static PaywallConfig FromJson(Dictionary<string, object> map)
+        {
+            var review = RevnixJson.GetObject(map, "review");
+            var offer = RevnixJson.GetObject(map, "offer");
+            var footer = RevnixJson.GetObject(map, "footer");
+            var config = new PaywallConfig
+            {
+                Template = RevnixJson.GetString(map, "template", "focus"),
+                Mode = RevnixJson.GetString(map, "mode"),
+                Headline = RevnixJson.GetString(map, "headline", ""),
+                Subheadline = RevnixJson.GetString(map, "subheadline"),
+                CtaLabel = RevnixJson.GetString(map, "ctaLabel", ""),
+                HighlightPackageId = RevnixJson.GetString(map, "highlightPackageId"),
+                BadgeText = RevnixJson.GetString(map, "badgeText"),
+                Accent = RevnixJson.GetString(map, "accent"),
+                HeroImageUrl = RevnixJson.GetString(map, "heroImageUrl"),
+                Review = review != null ? PaywallReview.FromJson(review) : null,
+                Offer = offer != null ? PaywallOffer.FromJson(offer) : null,
+                Footer = footer != null ? PaywallFooter.FromJson(footer) : null,
+            };
+            foreach (var item in RevnixJson.GetList(map, "features"))
+            {
+                if (item is Dictionary<string, object> feature) config.Features.Add(PaywallFeature.FromJson(feature));
+            }
+            return config;
+        }
+    }
+
+    /// <summary>Remote paywall design attached to a placement.</summary>
+    public sealed class PlacementPaywall
+    {
+        public string PaywallId;
+        public string Name;
+        public PaywallConfig Config;
+
+        public static PlacementPaywall FromJson(Dictionary<string, object> map) => new PlacementPaywall
+        {
+            PaywallId = RevnixJson.GetString(map, "paywallId", ""),
+            Name = RevnixJson.GetString(map, "name", ""),
+            Config = PaywallConfig.FromJson(RevnixJson.GetObject(map, "config") ?? new Dictionary<string, object>()),
+        };
+    }
+
     public sealed class PlacementResolution
     {
         public string Status;
@@ -277,17 +437,22 @@ namespace Revnix
 
         public PlacementOffering Offering;
 
-        /// <summary>Remote paywall render contract — app-rendered in v1.</summary>
-        public Dictionary<string, object> Paywall;
+        /// <summary>Remote paywall render contract — app-rendered in v1. Null
+        /// when the placement has no paywall attached.</summary>
+        public PlacementPaywall Paywall;
 
-        public static PlacementResolution FromJson(Dictionary<string, object> map) => new PlacementResolution
+        public static PlacementResolution FromJson(Dictionary<string, object> map)
         {
-            Status = RevnixJson.GetString(map, "status", ""),
-            PlacementKey = RevnixJson.GetString(map, "placementKey", ""),
-            Revision = RevnixJson.GetLong(map, "revision"),
-            Offering = PlacementOffering.FromJson(RevnixJson.GetObject(map, "offering") ?? new Dictionary<string, object>()),
-            Paywall = RevnixJson.GetObject(map, "paywall"),
-        };
+            var paywall = RevnixJson.GetObject(map, "paywall");
+            return new PlacementResolution
+            {
+                Status = RevnixJson.GetString(map, "status", ""),
+                PlacementKey = RevnixJson.GetString(map, "placementKey", ""),
+                Revision = RevnixJson.GetLong(map, "revision"),
+                Offering = PlacementOffering.FromJson(RevnixJson.GetObject(map, "offering") ?? new Dictionary<string, object>()),
+                Paywall = paywall != null ? PlacementPaywall.FromJson(paywall) : null,
+            };
+        }
     }
 
     /// <summary>Swallowed background failure (queue drains, telemetry beacons).</summary>

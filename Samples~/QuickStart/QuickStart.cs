@@ -27,6 +27,14 @@ public class QuickStart : MonoBehaviour
             var placement = await revnix.ResolvePlacement("main_paywall");
             Debug.Log("offering " + placement.Offering.OfferingId +
                       " with " + placement.Offering.Packages.Count + " packages");
+            if (placement.Paywall != null)
+            {
+                // Typed remote paywall design — render it with your own UI.
+                var config = placement.Paywall.Config;
+                Debug.Log("paywall '" + placement.Paywall.Name + "': layout " +
+                          config.Template + ", headline \"" + config.Headline +
+                          "\", CTA \"" + config.CtaLabel + "\"");
+            }
             await revnix.LogPaywallShown(placementKey: "main_paywall");
         }
         catch (RevnixException err)

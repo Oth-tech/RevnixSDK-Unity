@@ -427,6 +427,21 @@ namespace Revnix
         };
     }
 
+    /// <summary>REV-219: the running experiment's sticky assignment for this
+    /// customer. Attribution only — the served offering/paywall are already
+    /// the variant's, so the app just renders what it gets.</summary>
+    public sealed class PlacementExperiment
+    {
+        public string Key;
+        public string VariantId;
+
+        public static PlacementExperiment FromJson(Dictionary<string, object> map) => new PlacementExperiment
+        {
+            Key = RevnixJson.GetString(map, "key", ""),
+            VariantId = RevnixJson.GetString(map, "variantId", ""),
+        };
+    }
+
     public sealed class PlacementResolution
     {
         public string Status;
@@ -441,9 +456,14 @@ namespace Revnix
         /// when the placement has no paywall attached.</summary>
         public PlacementPaywall Paywall;
 
+        /// <summary>Null when no experiment applies — the server sends null,
+        /// and older servers omit the key entirely; both parse to null.</summary>
+        public PlacementExperiment Experiment;
+
         public static PlacementResolution FromJson(Dictionary<string, object> map)
         {
             var paywall = RevnixJson.GetObject(map, "paywall");
+            var experiment = RevnixJson.GetObject(map, "experiment");
             return new PlacementResolution
             {
                 Status = RevnixJson.GetString(map, "status", ""),
@@ -451,6 +471,7 @@ namespace Revnix
                 Revision = RevnixJson.GetLong(map, "revision"),
                 Offering = PlacementOffering.FromJson(RevnixJson.GetObject(map, "offering") ?? new Dictionary<string, object>()),
                 Paywall = paywall != null ? PlacementPaywall.FromJson(paywall) : null,
+                Experiment = experiment != null ? PlacementExperiment.FromJson(experiment) : null,
             };
         }
     }

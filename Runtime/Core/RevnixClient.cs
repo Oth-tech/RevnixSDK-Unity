@@ -21,7 +21,7 @@ namespace Revnix
     /// </summary>
     public sealed class RevnixClient
     {
-        public const string SdkVersion = "0.1.0";
+        public const string SdkVersion = "0.2.0";
 
         private const long ExpiryGraceMs = 3L * 24 * 3600 * 1000;
         private const long RollbackToleranceMs = 5L * 60 * 1000;
@@ -324,9 +324,12 @@ namespace Revnix
 
         public async Task<PlacementResolution> ResolvePlacement(string key)
         {
+            // REV-219: the customer id lets the server assign a sticky
+            // experiment variant; older servers ignore the parameter.
+            var query = new Dictionary<string, string> { ["customer"] = CustomerId() };
             try
             {
-                var raw = await Request("GET", new[] { "v1", "placements", key, "offering" });
+                var raw = await Request("GET", new[] { "v1", "placements", key, "offering" }, null, query);
                 var resolution = Decode(raw, PlacementResolution.FromJson);
                 _config.Storage.Set(PlacementKey(key), raw);
                 return resolution;
@@ -396,9 +399,37 @@ namespace Revnix
 
         // ── Transport ────────────────────────────────────────────────────────
 
-        private async Task<string> Request(string method, string[] segments, Dictionary<string, object> body = null)
+        /// <summary>Set attributes on the current customer (REV-033 v2).
+        /// Attributes are what A/B-test audiences target — set
+        /// <c>country</c>, <c>app_version</c>, <c>locale</c>, or any custom
+        /// key you want to segment on. A null value deletes the key.
+        ///
+        /// Throws, unlike the fire-and-forget beacons: the next placement
+        /// resolve may depend on these, so a silent failure would look like
+        /// broken targeting. <c>email</c> and <c>username</c> are reserved
+        /// (secret key only), and an attribute your backend already set
+        /// cannot be changed from a device.</summary>
+        public async Task SetAttributes(Dictionary<string, object> attributes)
         {
-            var url = BuildUrl(segments);
+            foreach (var entry in attributes)
+            {
+                if (entry.Value != null && !(entry.Value is string) &&
+                    !(entry.Value is int || entry.Value is long ||
+                      entry.Value is float || entry.Value is double))
+                {
+                    throw new ArgumentException(
+                        $"Attribute \"{entry.Key}\" must be a string, number, or null");
+                }
+            }
+            var body = new Dictionary<string, object> { ["attributes"] = attributes };
+            await Request("POST",
+                new[] { "v1", "customers", CustomerId(), "attributes" }, body);
+        }
+
+        private async Task<string> Request(string method, string[] segments,
+            Dictionary<string, object> body = null, Dictionary<string, string> query = null)
+        {
+            var url = BuildUrl(segments, query);
             var headers = new Dictionary<string, string>
             {
                 ["Authorization"] = "Bearer " + _config.ApiKey,
@@ -432,12 +463,24 @@ namespace Revnix
             return response.Body;
         }
 
-        private string BuildUrl(string[] segments)
+        private string BuildUrl(string[] segments, Dictionary<string, string> query = null)
         {
             var sb = new System.Text.StringBuilder(_config.BaseUrl.TrimEnd('/'));
             foreach (var segment in segments)
             {
                 sb.Append('/').Append(Uri.EscapeDataString(segment));
+            }
+            if (query != null)
+            {
+                var separator = '?';
+                foreach (var pair in query)
+                {
+                    sb.Append(separator)
+                      .Append(Uri.EscapeDataString(pair.Key))
+                      .Append('=')
+                      .Append(Uri.EscapeDataString(pair.Value));
+                    separator = '&';
+                }
             }
             return sb.ToString();
         }

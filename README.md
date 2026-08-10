@@ -18,6 +18,10 @@ and `revnix_flutter`, ported to C#:
 - **Placements** — `ResolvePlacement` returns the offering + typed remote
   paywall config (layout template, copy, review/offer blocks), with an
   offline fallback to the last resolution.
+- **A/B experiments** — placements resolve with the customer id, so a
+  running experiment serves a sticky variant per customer;
+  `PlacementResolution.Experiment` carries the assignment (`Key`,
+  `VariantId`) for attribution, null when no experiment applies.
 - **Optional Unity IAP bridge** — auto-detected via version defines; maps a
   purchased `Product` straight to a registration.
 

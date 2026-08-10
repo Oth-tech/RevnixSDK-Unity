@@ -12,6 +12,13 @@ A/B experiments (REV-219).
   experiment applies or the server predates experiments
 - Cached placement resolutions round-trip the experiment through the
   offline fallback
+- `SetAttributes(Dictionary<string, object>)` (REV-033) — the write half of
+  audience targeting. String/number values upsert, `null` deletes; anything
+  else throws `ArgumentException` before a request goes out. Awaits the
+  write and throws on failure, unlike the fire-and-forget beacons, since the
+  next `ResolvePlacement` may depend on it. `email`/`username` are reserved
+  (secret key only) and a server-set attribute cannot be changed from a
+  device; both reject the whole batch
 
 ## 0.1.0
 

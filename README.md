@@ -22,6 +22,9 @@ and `revnix_flutter`, ported to C#:
   running experiment serves a sticky variant per customer;
   `PlacementResolution.Experiment` carries the assignment (`Key`,
   `VariantId`) for attribution, null when no experiment applies.
+- **Audience targeting** — `SetAttributes` writes the customer attributes
+  those experiments target, so a mobile-only game can run "US players on
+  4.2+" tests.
 - **Optional Unity IAP bridge** — auto-detected via version defines; maps a
   purchased `Product` straight to a registration.
 
@@ -60,6 +63,29 @@ if (result != null) await revnix.WaitForEntitlements(result.Seq);
 
 `Configure` also drains the purchase retry queue and reports the install —
 both idempotent, both off the critical path.
+
+## Targeting an A/B audience
+
+An experiment can be narrowed to an audience — conditions over customer
+attributes. `SetAttributes` supplies the facts those conditions read:
+
+```csharp
+await revnix.SetAttributes(new Dictionary<string, object> {
+    ["country"] = "US",
+    ["app_version"] = "4.2.0",
+    ["levels_completed"] = 12,
+    ["stale_key"] = null,          // null deletes the key
+});
+```
+
+Values must be a string, a number, or null — anything else throws
+`ArgumentException` before a request goes out. This awaits the write and
+throws on failure, unlike the fire-and-forget beacons, because the next
+`ResolvePlacement` may depend on it. Set an audience's attributes *before* the
+first resolve on a covered placement; eligibility is checked at that resolve.
+`email` and `username` are reserved (secret key, from your own backend), and
+an attribute your backend already set cannot be changed from a device — both
+reject the whole batch rather than applying part of it.
 
 ## Design notes
 

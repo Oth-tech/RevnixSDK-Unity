@@ -18,6 +18,9 @@ and `revnix_flutter`, ported to C#:
 - **Placements** — `ResolvePlacement` returns the offering + typed remote
   paywall config (layout template, copy, review/offer blocks), with an
   offline fallback to the last resolution.
+- **Paywall UI** — `RevnixPaywallView` renders the published config as
+  runtime-generated UGUI (all nine layout templates, same structure as the
+  revnix-react renderer); no prefabs, no TextMeshPro, no extra dependencies.
 - **A/B experiments** — placements resolve with the customer id, so a
   running experiment serves a sticky variant per customer;
   `PlacementResolution.Experiment` carries the assignment (`Key`,
@@ -63,6 +66,48 @@ if (result != null) await revnix.WaitForEntitlements(result.Seq);
 
 `Configure` also drains the purchase retry queue and reports the install —
 both idempotent, both off the critical path.
+
+## Paywall UI
+
+`RevnixPaywallView` (namespace `Revnix.Unity.UI`, its own asmdef) draws the
+placement's published paywall config with runtime-generated UGUI — every
+layout template the dashboard offers, in lockstep with the revnix-react
+renderer. Deliberately zero extra dependencies: no prefabs, no bundled
+assets, legacy `UnityEngine.UI.Text` instead of TextMeshPro. Parent it under
+a Canvas (the scene needs an EventSystem for taps):
+
+```csharp
+using Revnix.Unity.UI;
+
+var placement = await revnix.ResolvePlacement("main_paywall");
+var packages = new List<RevnixPaywallPackage>
+{
+    // PriceLabel must be the store's localized price (Unity IAP metadata) —
+    // the display must never disagree with the charge.
+    new RevnixPaywallPackage { PackageId = "monthly", Title = "Monthly", PriceLabel = "$4.99/mo" },
+    new RevnixPaywallPackage { PackageId = "yearly",  Title = "Yearly",  PriceLabel = "$39.99/yr" },
+};
+
+var paywall = RevnixPaywallView.Create(canvas.transform, new RevnixPaywallOptions
+{
+    Config = placement.Paywall.Config,
+    Packages = packages,
+    OnPurchase = packageId => StartPurchase(packageId),
+    OnRestore = () => RestorePurchases(),
+    Client = revnix,                  // reports one paywall.viewed per Create
+    PlacementKey = "main_paywall",
+    PaywallId = placement.Paywall.PaywallId,
+});
+
+paywall.SetLoading(true);  // spinner in the CTA while the purchase runs
+paywall.Dismiss();         // tear down after the unlock
+```
+
+`SelectedPackageId` reads the current selection — or set it to drive the
+selection from the app (controlled mode, RN semantics; set null to hand
+control back to the view). Footer links honor the dashboard's footer config;
+an explicit `OnTerms`/`OnPrivacy` handler wins over a config URL, which
+otherwise opens via `Application.OpenURL`.
 
 ## Targeting an A/B audience
 

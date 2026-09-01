@@ -151,15 +151,84 @@ namespace Revnix.Unity.UI
             _accentTint40 = Hex(RevnixPaywallLogic.AccentTint40(accentHex), WithAlpha(_accent, 0x40 / 255f));
             _cardBg = Hex(RevnixPaywallLogic.CardBackground(_config), new Color(0.1f, 0.11f, 0.13f));
 
-            var column = BuildScaffold();
-            BuildBody(column);
-            RefreshSelection();
+            // Precedence: a designed paywall (`config.Blocks`) wins over the
+            // classic layouts below, which stay the fallback for every paywall
+            // published before the block builder — so anything already live
+            // draws unchanged.
+            if (!BuildBlocks())
+            {
+                var column = BuildScaffold();
+                BuildBody(column);
+                RefreshSelection();
+            }
 
             // One view per Create: re-creating (a re-shown paywall) is a
             // genuine new display; property updates are not (REV-094).
             if (options.Client != null && !options.DisableViewTracking)
             {
                 _ = options.Client.LogPaywallShown(options.PlacementKey, options.PaywallId);
+            }
+        }
+
+        /// <summary>
+        /// Draws a designed paywall, reporting whether it succeeded.
+        ///
+        /// Wrapped so a malformed document costs the paywall its DESIGN, not
+        /// the purchase: if the tree fails to build, Initialize carries on into
+        /// the classic layout, which is a working screen the customer can still
+        /// buy from. A shipped app cannot be patched from our side, so the
+        /// fallback matters more than the failure being loud.
+        /// </summary>
+        private bool BuildBlocks()
+        {
+            var doc = PaywallBlockDoc.Parse(_config.Blocks);
+            if (doc == null) return false;
+
+            var packages = new List<BlockPackage>();
+            foreach (var pkg in _options.Packages ?? new List<RevnixPaywallPackage>())
+            {
+                packages.Add(new BlockPackage
+                {
+                    PackageId = pkg.PackageId,
+                    Title = pkg.Title,
+                    PriceLabel = pkg.PriceLabel,
+                    Period = pkg.Period,
+                    AmountMinor = pkg.AmountMinor,
+                    Currency = pkg.Currency,
+                });
+            }
+
+            var selected = _controlledSelected;
+            if (string.IsNullOrEmpty(selected)) selected = _config.HighlightPackageId;
+            if (string.IsNullOrEmpty(selected) && packages.Count > 0) selected = packages[0].PackageId;
+
+            try
+            {
+                new RevnixPaywallBlockRenderer(new BlockRenderContext
+                {
+                    Doc = doc,
+                    Packages = packages,
+                    SelectedPackageId = selected,
+                    HeroImageUrl = _config.HeroImageUrl,
+                    FooterTermsUrl = _config.Footer != null ? _config.Footer.TermsUrl : null,
+                    FooterPrivacyUrl = _config.Footer != null ? _config.Footer.PrivacyUrl : null,
+                    OnPurchase = id =>
+                    {
+                        if (!_loading && _options.OnPurchase != null) _options.OnPurchase(id);
+                    },
+                    OnRestore = _options.OnRestore,
+                    OnTerms = _options.OnTerms,
+                    OnPrivacy = _options.OnPrivacy,
+                    Font = _font,
+                }).Build(transform);
+                return true;
+            }
+            catch (Exception)
+            {
+                // Clear whatever was half-built before falling back, so the
+                // classic layout does not draw on top of a partial design.
+                for (var i = transform.childCount - 1; i >= 0; i--) Destroy(transform.GetChild(i).gameObject);
+                return false;
             }
         }
 

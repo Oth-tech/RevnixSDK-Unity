@@ -384,6 +384,18 @@ namespace Revnix
         /// <summary>Null (legacy config) = show restore/terms/privacy.</summary>
         public PaywallFooter Footer;
 
+        /// <summary>A designed paywall: the block tree the dashboard's builder
+        /// authored. When present RevnixPaywallView draws THIS and the fields
+        /// above act as the fallback for apps on an SDK that predates block
+        /// rendering — so an older app keeps showing a sane classic screen
+        /// instead of nothing.
+        ///
+        /// Held as the raw parsed JSON rather than a typed tree so a document
+        /// from a NEWER dashboard can never fail to parse here;
+        /// <see cref="PaywallBlockDoc.Parse"/> turns it into the parts this SDK
+        /// understands.</summary>
+        public object Blocks;
+
         public static PaywallConfig FromJson(Dictionary<string, object> map)
         {
             var review = RevnixJson.GetObject(map, "review");
@@ -403,6 +415,7 @@ namespace Revnix
                 Review = review != null ? PaywallReview.FromJson(review) : null,
                 Offer = offer != null ? PaywallOffer.FromJson(offer) : null,
                 Footer = footer != null ? PaywallFooter.FromJson(footer) : null,
+                Blocks = map != null && map.TryGetValue("blocks", out var blocks) ? blocks : null,
             };
             foreach (var item in RevnixJson.GetList(map, "features"))
             {

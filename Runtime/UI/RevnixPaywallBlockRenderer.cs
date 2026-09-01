@@ -59,6 +59,12 @@ namespace Revnix.Unity.UI
         public Action OnRestore;
         public Action OnTerms;
         public Action OnPrivacy;
+
+        /// <summary>Dismissal (REV-252). Null means the host wired none, and
+        /// no close is drawn at all — a dead close button is worse than
+        /// none.</summary>
+        public Action OnClose;
+
         public Font Font;
     }
 
@@ -133,7 +139,63 @@ namespace Revnix.Unity.UI
             {
                 Render(block, body.transform, null);
             }
+            // Parented to the SCREEN, not the scaled body, so the fallback
+            // close keeps its tap size and its distance from the screen edge
+            // whatever the device width does to the design (REV-252).
+            BuildFallbackClose(screen.transform);
             return screen;
+        }
+
+        /// <summary>
+        /// The dismiss affordance the renderer supplies itself (REV-252).
+        ///
+        /// Drawn only when the design authors no close of its own AND the host
+        /// wired an OnClose — which is what makes every paywall published
+        /// before close existed dismissible without being re-authored, while a
+        /// design that DOES carry a close chip never ends up showing two.
+        ///
+        /// Deliberately plain: it is a safety net, not a design element.
+        /// Tinted from the screen's own ink rather than a fixed white, so it
+        /// stays legible on a light design as well as a dark one.
+        /// </summary>
+        private void BuildFallbackClose(Transform parent)
+        {
+            var onClose = _ctx.OnClose;
+            if (onClose == null || RevnixPaywallClose.HasCloseAction(_doc.Blocks)) return;
+
+            var ink = Color(_doc.TextColor, UnityEngine.Color.white);
+            var go = NewUI("RevnixFallbackClose", parent);
+            var rt = (RectTransform)go.transform;
+            rt.anchorMin = new Vector2(1f, 1f);
+            rt.anchorMax = new Vector2(1f, 1f);
+            rt.pivot = new Vector2(1f, 1f);
+            rt.sizeDelta = new Vector2(30f, 30f);
+            rt.anchoredPosition = new Vector2(-14f, -14f);
+
+            var image = go.AddComponent<Image>();
+            var sprite = RevnixPaywallSprites.Rounded(15);
+            if (sprite != null)
+            {
+                image.sprite = sprite;
+                image.type = Image.Type.Sliced;
+            }
+            image.color = new UnityEngine.Color(ink.r, ink.g, ink.b, 0.14f);
+            image.raycastTarget = true;
+
+            var button = go.AddComponent<Button>();
+            button.transition = Selectable.Transition.None;
+            button.targetGraphic = image;
+            button.onClick.AddListener(() => onClose());
+
+            var label = NewUI("Glyph", go.transform);
+            Fill((RectTransform)label.transform);
+            var text = label.AddComponent<Text>();
+            if (_ctx.Font != null) text.font = _ctx.Font;
+            text.text = "\u00d7";
+            text.fontSize = 17;
+            text.color = ink;
+            text.alignment = TextAnchor.MiddleCenter;
+            text.raycastTarget = false;
         }
 
         private bool IsCanvas => _doc.Layout == "canvas";
@@ -147,9 +209,9 @@ namespace Revnix.Unity.UI
             switch (block.Kind)
             {
                 case PaywallBlockKind.Text:
-                    return RenderText(block, parent, pkg);
+                    return CloseOnTap(RenderText(block, parent, pkg), block.Action);
                 case PaywallBlockKind.Image:
-                    return RenderImage(block, parent);
+                    return CloseOnTap(RenderImage(block, parent), block.Action);
                 case PaywallBlockKind.List:
                     return RenderList(block, parent);
                 case PaywallBlockKind.Products:
@@ -294,15 +356,32 @@ namespace Revnix.Unity.UI
                 image.sprite = sprite;
                 image.type = Image.Type.Sliced;
             }
-            image.color = Color(block.Style?.Fill, Color(_doc.Accent, UnityEngine.Color.blue));
+            // A button the design marks as the close dismisses instead of
+            // buying, and takes no accent fill: the CTA must stay the one
+            // accented thing on the screen, or a "Not now" competes with
+            // "Subscribe" for the eye.
+            var closes = block.Action == BlockAction.Close && _ctx.OnClose != null;
+            image.color = Color(
+                block.Style?.Fill,
+                closes
+                    ? new UnityEngine.Color(0f, 0f, 0f, 0f)
+                    : Color(_doc.Accent, UnityEngine.Color.blue));
 
             var button = go.AddComponent<Button>();
             button.targetGraphic = image;
-            var selected = _ctx.SelectedPackageId
-                ?? (_ctx.Packages.Count > 0 ? _ctx.Packages[0].PackageId : null);
-            if (selected != null && _ctx.OnPurchase != null)
+            if (closes)
             {
-                button.onClick.AddListener(() => _ctx.OnPurchase(selected));
+                var onClose = _ctx.OnClose;
+                button.onClick.AddListener(() => onClose());
+            }
+            else
+            {
+                var selected = _ctx.SelectedPackageId
+                    ?? (_ctx.Packages.Count > 0 ? _ctx.Packages[0].PackageId : null);
+                if (selected != null && _ctx.OnPurchase != null)
+                {
+                    button.onClick.AddListener(() => _ctx.OnPurchase(selected));
+                }
             }
 
             var label = NewUI("Label", go.transform);
@@ -312,7 +391,11 @@ namespace Revnix.Unity.UI
             text.text = RevnixPaywallTags.Resolve(block.Label ?? "", pkg, _ctx.Packages);
             text.fontSize = (int)Math.Round(block.Style?.FontSize ?? 15);
             text.fontStyle = FontStyle.Bold;
-            text.color = Color(block.Style?.TextColor, Color(_doc.AccentInk, UnityEngine.Color.white));
+            text.color = Color(
+                block.Style?.TextColor,
+                closes
+                    ? Color(_doc.TextColor, UnityEngine.Color.white)
+                    : Color(_doc.AccentInk, UnityEngine.Color.white));
             text.alignment = TextAnchor.MiddleCenter;
             text.raycastTarget = false;
 
@@ -480,6 +563,35 @@ namespace Revnix.Unity.UI
                 MakeSelectable(card, pkg.PackageId);
             }
             ApplyBox(go, block.Style, paint: false);
+            return go;
+        }
+
+        /// <summary>
+        /// Makes an element the paywall's dismiss target when the design marks
+        /// it as one (REV-252), and returns it either way.
+        ///
+        /// A block with no close action gets no Button at all, so it never
+        /// intercepts a tap meant for what sits behind it. Like
+        /// <see cref="MakeSelectable"/>, an element with no art of its own
+        /// needs a transparent raycast target or the tap falls through.
+        /// </summary>
+        private GameObject CloseOnTap(GameObject go, BlockAction action)
+        {
+            if (go == null || action != BlockAction.Close || _ctx.OnClose == null) return go;
+            var target = go.GetComponent<Graphic>();
+            if (target == null)
+            {
+                var image = go.AddComponent<Image>();
+                image.color = new UnityEngine.Color(0f, 0f, 0f, 0f);
+                target = image;
+            }
+            target.raycastTarget = true;
+
+            var button = go.AddComponent<Button>();
+            button.transition = Selectable.Transition.None;
+            button.targetGraphic = target;
+            var onClose = _ctx.OnClose;
+            button.onClick.AddListener(() => onClose());
             return go;
         }
 

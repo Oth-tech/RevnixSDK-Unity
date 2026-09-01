@@ -30,6 +30,14 @@ namespace Revnix.Unity.UI
         public Action OnTerms;
         public Action OnPrivacy;
 
+        /// <summary>Dismissal (REV-252). The HOST performs it — only the game
+        /// knows whether that means destroying the paywall object, hiding a
+        /// canvas, or resuming play — so the view never destroys itself. Omit
+        /// it and no close is drawn at all: a dead close button is worse than
+        /// none. Setting <see cref="Client"/> as well reports
+        /// <c>paywall.closed</c> against this display's own view id.</summary>
+        public Action OnClose;
+
         /// <summary>Partial theme override; null fields inherit the config's
         /// dark/light base scheme.</summary>
         public RevnixPaywallTheme Theme;

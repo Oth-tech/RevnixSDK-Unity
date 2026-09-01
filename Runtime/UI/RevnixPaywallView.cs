@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
@@ -167,14 +168,56 @@ namespace Revnix.Unity.UI
                 var column = BuildScaffold();
                 BuildBody(column);
                 RefreshSelection();
+                BuildClassicClose();
             }
 
             // One view per Create: re-creating (a re-shown paywall) is a
             // genuine new display; property updates are not (REV-094).
             if (options.Client != null && !options.DisableViewTracking)
             {
-                _ = options.Client.LogPaywallShown(options.PlacementKey, options.PaywallId);
+                _viewReport = options.Client.LogPaywallDisplay(
+                    options.PlacementKey, options.PaywallId);
             }
+        }
+
+        /// <summary>The in-flight view beacon (REV-252). The close AWAITS this
+        /// rather than reading an id off a field: the id only exists once the
+        /// request returns, and a player who dismisses in that window would
+        /// otherwise report a close with no id and lose the pairing.</summary>
+        private Task<string> _viewReport;
+
+        /// <summary>
+        /// Runs the host's dismissal, reporting <c>paywall.closed</c> alongside
+        /// it (REV-252). The host's callback runs FIRST and unconditionally:
+        /// the beacon is best-effort, and an analytics failure must never be
+        /// able to trap the player on the screen.
+        /// </summary>
+        private void CloseAndReport()
+        {
+            if (_options.OnClose != null) _options.OnClose();
+            if (_options.Client == null || _options.DisableViewTracking) return;
+            var report = _viewReport;
+            if (report == null) return;
+            _ = ReportClose(report, _options);
+        }
+
+        private static async Task ReportClose(Task<string> viewReport, RevnixPaywallOptions options)
+        {
+            // Awaiting the view beacon is what keeps the pair intact when the
+            // player dismisses before it lands. It has usually finished long
+            // ago, in which case this resumes immediately.
+            string viewId;
+            try
+            {
+                viewId = await viewReport;
+            }
+            catch (Exception)
+            {
+                return;
+            }
+            if (viewId == null) return;
+            await options.Client.LogPaywallClosed(
+                viewId, options.PlacementKey, options.PaywallId);
         }
 
         /// <summary>
@@ -228,6 +271,7 @@ namespace Revnix.Unity.UI
                     OnRestore = _options.OnRestore,
                     OnTerms = _options.OnTerms,
                     OnPrivacy = _options.OnPrivacy,
+                    OnClose = _options.OnClose == null ? null : (Action)CloseAndReport,
                     Font = _font,
                 }).Build(transform);
                 return true;
@@ -1131,6 +1175,61 @@ namespace Revnix.Unity.UI
 
         private static string IconOrCheck(string icon)
             => RevnixPaywallLogic.Truthy(icon) ? icon : "✓";
+
+        /// <summary>
+        /// The dismiss affordance the classic layouts get (REV-252).
+        ///
+        /// The nine `template` layouts have the same problem the designed ones
+        /// had — nothing on the screen closes them — and OnClose is an option
+        /// of the shared view, so a host that wires it must get a close on
+        /// either path rather than silently nothing. Classic layouts author no
+        /// elements of their own, so there is never a design chip to suppress:
+        /// the rule reduces to "draw it whenever the host wired a handler".
+        ///
+        /// The designed path draws its own (inside the block renderer, where it
+        /// can see the tree), so this is never called there.
+        /// </summary>
+        private void BuildClassicClose()
+        {
+            if (_options.OnClose == null) return;
+
+            var go = NewUI("RevnixClassicClose", transform);
+            var rt = (RectTransform)go.transform;
+            rt.anchorMin = new Vector2(1f, 1f);
+            rt.anchorMax = new Vector2(1f, 1f);
+            rt.pivot = new Vector2(1f, 1f);
+            rt.sizeDelta = new Vector2(30f, 30f);
+            rt.anchoredPosition = new Vector2(-14f, -14f);
+
+            var image = go.AddComponent<Image>();
+            var sprite = RevnixPaywallSprites.Rounded(15);
+            if (sprite != null)
+            {
+                image.sprite = sprite;
+                image.type = Image.Type.Sliced;
+            }
+            image.color = new Color(_textPrimary.r, _textPrimary.g, _textPrimary.b, 0.14f);
+            image.raycastTarget = true;
+
+            var button = go.AddComponent<Button>();
+            button.transition = Selectable.Transition.None;
+            button.targetGraphic = image;
+            button.onClick.AddListener(CloseAndReport);
+
+            var label = NewUI("Glyph", go.transform);
+            var lrt = (RectTransform)label.transform;
+            lrt.anchorMin = Vector2.zero;
+            lrt.anchorMax = Vector2.one;
+            lrt.offsetMin = Vector2.zero;
+            lrt.offsetMax = Vector2.zero;
+            var text = label.AddComponent<Text>();
+            if (_font != null) text.font = _font;
+            text.text = "\u00d7";
+            text.fontSize = 17;
+            text.color = _textPrimary;
+            text.alignment = TextAnchor.MiddleCenter;
+            text.raycastTarget = false;
+        }
 
         private static GameObject NewUI(string name, Transform parent)
         {

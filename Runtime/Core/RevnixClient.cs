@@ -378,10 +378,27 @@ namespace Revnix
         /// conversions). Call when the paywall becomes visible.</summary>
         public async Task LogPaywallShown(string placementKey = null, string paywallId = null)
         {
+            await LogPaywallDisplay(placementKey, paywallId);
+        }
+
+        /// <summary>
+        /// The same beacon, returning the view id it generated (REV-252).
+        ///
+        /// Hand that id to <see cref="LogPaywallClosed"/> when the customer
+        /// dismisses THIS display: the two events sharing one view id is what
+        /// lets the ledger pair a close with the display it ended, and the gap
+        /// between their timestamps is the customer's dwell on the screen. The
+        /// id comes back even when delivery fails — the caller's pairing must
+        /// not depend on the network, and the close beacon carries its own
+        /// idempotency key.
+        /// </summary>
+        public async Task<string> LogPaywallDisplay(string placementKey = null, string paywallId = null)
+        {
+            var viewId = Guid.NewGuid().ToString("D").ToLowerInvariant();
             var body = new Dictionary<string, object>
             {
                 ["customerId"] = CustomerId(),
-                ["viewId"] = Guid.NewGuid().ToString("D").ToLowerInvariant(),
+                ["viewId"] = viewId,
                 ["sdkVersion"] = SdkVersion,
             };
             if (placementKey != null) body["placementKey"] = placementKey;
@@ -394,6 +411,33 @@ namespace Revnix
             {
                 _bgFailures += 1;
                 Diagnostic("logPaywallShown", err.Message);
+            }
+            return viewId;
+        }
+
+        /// <summary>
+        /// Fire-and-forget dismissal beacon (REV-252) — the other half of a
+        /// display's life. Idempotent per view id, exactly like the view
+        /// report. Pass the id <see cref="LogPaywallDisplay"/> returned.
+        /// </summary>
+        public async Task LogPaywallClosed(string viewId, string placementKey = null, string paywallId = null)
+        {
+            var body = new Dictionary<string, object>
+            {
+                ["customerId"] = CustomerId(),
+                ["viewId"] = viewId ?? "",
+                ["sdkVersion"] = SdkVersion,
+            };
+            if (placementKey != null) body["placementKey"] = placementKey;
+            if (paywallId != null) body["paywallId"] = paywallId;
+            try
+            {
+                await Request("POST", new[] { "v1", "paywalls", "closed" }, body);
+            }
+            catch (RevnixException err)
+            {
+                _bgFailures += 1;
+                Diagnostic("logPaywallClosed", err.Message);
             }
         }
 

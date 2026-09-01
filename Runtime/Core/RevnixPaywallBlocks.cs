@@ -349,6 +349,26 @@ namespace Revnix
         Card,
     }
 
+    /// <summary>
+    /// What tapping a block does. <see cref="BlockAction.None"/> means the
+    /// block is decoration.
+    ///
+    /// A FIELD on the existing block types rather than a new block type: an
+    /// SDK older than this one drops the field and still draws the element
+    /// exactly as it does today, so a design carrying a close chip degrades to
+    /// inert. A new block type would have landed as
+    /// <see cref="PaywallBlockKind.Unknown"/> and vanished from the screen
+    /// instead — worse than the bug this fixes.
+    /// </summary>
+    public enum BlockAction
+    {
+        /// <summary>Decoration, or an action this SDK does not know.</summary>
+        None = 0,
+
+        /// <summary>Tapping the block dismisses the paywall.</summary>
+        Close,
+    }
+
     /// <summary>One entry of a list block.</summary>
     public sealed class BlockListItem
     {
@@ -371,6 +391,11 @@ namespace Revnix
         public PaywallBlockKind Kind = PaywallBlockKind.Unknown;
         public string Id = "";
         public BlockStyle Style;
+
+        /// <summary>What tapping this block does — text, image and button
+        /// blocks only; every other kind ignores it. See
+        /// <see cref="BlockAction"/>.</summary>
+        public BlockAction Action = BlockAction.None;
 
         // text / button
         public string Text;
@@ -505,6 +530,11 @@ namespace Revnix
             {
                 Id = RevnixJson.GetString(map, "id", ""),
                 Style = BlockStyle.FromJson(RevnixJson.GetObject(map, "style")),
+                // An action this SDK does not know stays None, leaving the
+                // element inert rather than discarding the block.
+                Action = RevnixJson.GetString(map, "action") == "close"
+                    ? BlockAction.Close
+                    : BlockAction.None,
             };
             switch (RevnixJson.GetString(map, "type"))
             {
@@ -608,6 +638,49 @@ namespace Revnix
     /// Tag variables — the vocabulary a designed paywall's copy uses to talk
     /// about the packages attached to it.
     /// </summary>
+    /// <summary>Close-affordance rules shared by the whole tree.</summary>
+    public static class RevnixPaywallClose
+    {
+        /// <summary>
+        /// Does this tree author a dismiss affordance that is CERTAIN to render?
+        ///
+        /// The renderer draws its own close button only when this is false, so
+        /// a design published before close existed becomes dismissible without
+        /// being re-authored, and a design that DOES author a close chip never
+        /// shows two. The same predicate exists in every Revnix SDK — keep
+        /// them identical.
+        /// </summary>
+        public static bool HasCloseAction(List<PaywallBlock> blocks)
+        {
+            if (blocks == null) return false;
+            foreach (var block in blocks)
+            {
+                if (block == null) continue;
+                switch (block.Kind)
+                {
+                    case PaywallBlockKind.Text:
+                    case PaywallBlockKind.Image:
+                    case PaywallBlockKind.Button:
+                        if (block.Action == BlockAction.Close) return true;
+                        break;
+                    case PaywallBlockKind.Card:
+                        // Conditional containers are deliberately not searched:
+                        // a `repeat` card renders once per package (none, when
+                        // the offering is empty) and a `packageIndex` card is
+                        // hidden when the offering does not reach that index, so
+                        // a close authored inside one MIGHT not appear.
+                        // Counting it would suppress the fallback and leave the
+                        // customer with no way out — the exact bug this feature
+                        // exists to fix.
+                        if (block.Repeat == null && block.PackageIndex == null &&
+                            HasCloseAction(block.Children)) return true;
+                        break;
+                }
+            }
+            return false;
+        }
+    }
+
     public static class RevnixPaywallTags
     {
         /// <summary>Renewal cycles, in months. Lifetime and one-time products

@@ -50,6 +50,12 @@ namespace Revnix.Unity.UI
         public string FooterPrivacyUrl;
 
         public Action<string> OnPurchase;
+
+        /// <summary>Reports a plan card tap. Selection is the paywall's own
+        /// state, so a design's plan cards work without the host wiring
+        /// anything.</summary>
+        public Action<string> OnSelect;
+
         public Action OnRestore;
         public Action OnTerms;
         public Action OnPrivacy;
@@ -468,9 +474,38 @@ namespace Revnix.Unity.UI
                     AddPlanLine(card.transform, block.BadgeText, 10, true);
                 }
                 ApplyBox(card, highlighted ? block.HighlightStyle : block.CardStyle, paint: false);
+                // The whole card is the target, not just its glyphs — a plan
+                // row is mostly padding, and tapping beside the price must
+                // select. The card's own Image is the raycast target.
+                MakeSelectable(card, pkg.PackageId);
             }
             ApplyBox(go, block.Style, paint: false);
             return go;
+        }
+
+        /// <summary>
+        /// Makes a card its package's selection target. UGUI routes clicks
+        /// through a raycast target, so a card with no art of its own gets a
+        /// fully transparent Image — without one the tap falls straight
+        /// through to whatever the design draws behind it.
+        /// </summary>
+        private void MakeSelectable(GameObject go, string packageId)
+        {
+            if (_ctx.OnSelect == null || string.IsNullOrEmpty(packageId)) return;
+            var target = go.GetComponent<Graphic>();
+            if (target == null)
+            {
+                var image = go.AddComponent<Image>();
+                image.color = new UnityEngine.Color(0f, 0f, 0f, 0f);
+                target = image;
+            }
+            target.raycastTarget = true;
+
+            var button = go.AddComponent<Button>();
+            button.transition = Selectable.Transition.None;
+            button.targetGraphic = target;
+            var id = packageId;
+            button.onClick.AddListener(() => _ctx.OnSelect(id));
         }
 
         private void AddPlanLine(Transform parent, string content, int size, bool bold, float alpha = 1f)
@@ -544,7 +579,8 @@ namespace Revnix.Unity.UI
                         var style = each.PackageId == selected
                             ? (block.Style ?? new BlockStyle()).Merging(block.SelectedStyle)
                             : block.Style;
-                        Container(block, wrapper.transform, each, style);
+                        var instance = Container(block, wrapper.transform, each, style);
+                        MakeSelectable(instance, each.PackageId);
                     }
                 }
                 return wrapper;
@@ -553,10 +589,25 @@ namespace Revnix.Unity.UI
             // A card that names a package the offering does not reach is
             // dropped rather than drawn with unresolved tags.
             if (block.PackageIndex.HasValue && block.PackageIndex.Value >= _ctx.Packages.Count) return null;
-            var ctxPackage = block.PackageIndex.HasValue
+            var pinned = block.PackageIndex.HasValue
                 ? _ctx.Packages[block.PackageIndex.Value]
-                : pkg;
-            return Container(block, parent, ctxPackage, block.Style);
+                : null;
+            var ctxPackage = pinned ?? pkg;
+            // A card pinned to a package doubles as its selection target —
+            // that is how hand-styled plan rows (a highlighted annual beside a
+            // plain monthly) become tappable without a products block. It takes
+            // `selectedStyle` when selected for the same reason a repeated card
+            // does, or tapping it would change what the CTA buys with no
+            // visible answer. A card that names no package is decoration and
+            // stays inert.
+            var selected = _ctx.SelectedPackageId
+                ?? (_ctx.Packages.Count > 0 ? _ctx.Packages[0].PackageId : null);
+            var style = pinned != null && pinned.PackageId == selected
+                ? (block.Style ?? new BlockStyle()).Merging(block.SelectedStyle)
+                : block.Style;
+            var card = Container(block, parent, ctxPackage, style);
+            if (pinned != null) MakeSelectable(card, pinned.PackageId);
+            return card;
         }
 
         private GameObject Container(PaywallBlock block, Transform parent, BlockPackage pkg, BlockStyle style)

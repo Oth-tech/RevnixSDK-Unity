@@ -65,7 +65,10 @@ namespace Revnix.Unity.UI
             set
             {
                 _controlledSelected = value;
-                RefreshSelection();
+                // Same split as Select(): a designed paywall redraws, because
+                // its selected treatment is structural and no selectables are
+                // registered on that path.
+                if (_blockPaywall) RebuildBlocks(); else RefreshSelection();
             }
         }
 
@@ -106,6 +109,9 @@ namespace Revnix.Unity.UI
         private bool _loading;
         private string _controlledSelected;
         private string _internalSelected;
+
+        /// <summary>Whether the view drew a designed (block) paywall.</summary>
+        private bool _blockPaywall;
 
         private sealed class SelectableRecord
         {
@@ -155,7 +161,8 @@ namespace Revnix.Unity.UI
             // classic layouts below, which stay the fallback for every paywall
             // published before the block builder — so anything already live
             // draws unchanged.
-            if (!BuildBlocks())
+            _blockPaywall = BuildBlocks();
+            if (!_blockPaywall)
             {
                 var column = BuildScaffold();
                 BuildBody(column);
@@ -198,9 +205,10 @@ namespace Revnix.Unity.UI
                 });
             }
 
-            var selected = _controlledSelected;
-            if (string.IsNullOrEmpty(selected)) selected = _config.HighlightPackageId;
-            if (string.IsNullOrEmpty(selected) && packages.Count > 0) selected = packages[0].PackageId;
+            // The same resolver the classic path uses, so a tapped selection
+            // survives the redraw: controlled → internal → highlight → first.
+            var selected = RevnixPaywallLogic.ResolveSelection(
+                _config, _options.Packages, _controlledSelected, _internalSelected);
 
             try
             {
@@ -216,6 +224,7 @@ namespace Revnix.Unity.UI
                     {
                         if (!_loading && _options.OnPurchase != null) _options.OnPurchase(id);
                     },
+                    OnSelect = Select,
                     OnRestore = _options.OnRestore,
                     OnTerms = _options.OnTerms,
                     OnPrivacy = _options.OnPrivacy,
@@ -1041,7 +1050,27 @@ namespace Revnix.Unity.UI
         {
             _internalSelected = packageId;
             _options.OnSelectPackage?.Invoke(packageId);
-            RefreshSelection();
+            if (_blockPaywall) RebuildBlocks(); else RefreshSelection();
+        }
+
+        /// <summary>
+        /// Redraws a designed paywall after a selection change. Its selected
+        /// treatment is structural — a badge and a sub-line appear, and an
+        /// arbitrary `selectedStyle` merges in — so it is rebuilt rather than
+        /// restyled in place, the way the classic layouts are.
+        /// </summary>
+        private void RebuildBlocks()
+        {
+            for (var i = transform.childCount - 1; i >= 0; i--)
+            {
+                var child = transform.GetChild(i).gameObject;
+                // Destroy only takes effect at the end of the frame, so the
+                // old tree is detached first — otherwise it would draw on top
+                // of the one being built here.
+                child.transform.SetParent(null, false);
+                Destroy(child);
+            }
+            _blockPaywall = BuildBlocks();
         }
 
         /// <summary>2px accent border on the selected package, 1px theme

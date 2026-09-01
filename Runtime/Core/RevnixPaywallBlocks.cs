@@ -447,7 +447,19 @@ namespace Revnix
         /// column.</summary>
         public string Layout;
 
+        /// <summary>
+        /// The ground paint — a colour or a CSS gradient string. Kept flat
+        /// because it is what `@bg` resolves against and what every unedited
+        /// paywall has.
+        /// </summary>
         public string Background = "#000000";
+
+        /// <summary>
+        /// The background exactly as published, so the photo and scrim layers
+        /// can be resolved. Null for a document whose background is a plain
+        /// string.
+        /// </summary>
+        public object BackgroundSpec;
         public string TextColor = "#FFFFFF";
         public string Accent = "#6478ff";
         public string AccentInk = "#FFFFFF";
@@ -476,9 +488,12 @@ namespace Revnix
                 FontFamily = RevnixJson.GetString(map, "fontFamily"),
             };
             // `background` is a plain string in the original form and an object
-            // in the layered one; both reduce to the ground colour drawn here.
-            doc.Background = RevnixJson.GetString(map, "background")
-                ?? RevnixJson.GetString(RevnixJson.GetObject(map, "background"), "ground", "#000000");
+            // in the layered one. The object's ground field is `color` —
+            // `ground` is the name of the RESOLVED layer, and reading that off
+            // the wire is what used to paint every edited paywall black.
+            map.TryGetValue("background", out var backgroundSpec);
+            doc.BackgroundSpec = backgroundSpec;
+            doc.Background = RevnixBackground.Ground(backgroundSpec) ?? "#000000";
             foreach (var item in list) doc.Blocks.Add(ParseBlock(item));
             return doc;
         }
@@ -854,6 +869,10 @@ namespace Revnix
                 {
                     case "accent": raw = doc.Accent; break;
                     case "accentInk": raw = doc.AccentInk; break;
+                    // The raw ground, gradient and all — exactly what the
+                    // dashboard answers `@bg` with. A gradient is not a colour,
+                    // so ParseColor returns null and the caller keeps its own
+                    // default, which is what the builder shows.
                     case "bg": raw = doc.Background; break;
                     case "text": raw = doc.TextColor; break;
                     default: return null;

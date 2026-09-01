@@ -86,9 +86,16 @@ namespace Revnix.Unity.UI
             var screen = NewUI("RevnixBlockScreen", parent);
             var screenRt = (RectTransform)screen.transform;
             Fill(screenRt);
+            var layers = RevnixBackground.Resolve(_doc.BackgroundSpec);
             var background = screen.AddComponent<Image>();
-            background.color = Color(_doc.Background, UnityEngine.Color.black);
+            // The flat colour under everything. A gradient resolves to its first
+            // stop here, so a form the parser does not understand still shows a
+            // colour from the design rather than black.
+            background.color = Color(
+                RevnixBackground.BaseColor(layers.Ground ?? _doc.Background),
+                UnityEngine.Color.black);
             background.raycastTarget = false;
+            BuildBackgroundArt(layers, screen.transform);
 
             var body = NewUI("Blocks", screen.transform);
             var bodyRt = (RectTransform)body.transform;
@@ -797,6 +804,94 @@ namespace Revnix.Unity.UI
             {
                 go.transform.localRotation = Quaternion.Euler(0f, 0f, -(float)style.Rotate.Value);
             }
+        }
+
+        /// <summary>
+        /// The gradient, photo and scrim layers, bottom first. Nothing is built
+        /// for an unedited paywall whose background is a flat colour, so that
+        /// case renders exactly as it did before.
+        ///
+        /// Sibling order is paint order in UGUI, and these are added before the
+        /// block body, so the content always sits above the art.
+        /// </summary>
+        private void BuildBackgroundArt(RevnixBackgroundLayers layers, Transform parent)
+        {
+            if (layers == null) return;
+
+            if (!string.IsNullOrEmpty(layers.Ground))
+            {
+                var gradients = RevnixBackground.ParseGradients(
+                    layers.Ground,
+                    value => RevnixBlockColor.Resolve(value, _doc).HasValue);
+                foreach (var gradient in gradients)
+                {
+                    AddGradient(gradient, parent, "RevnixBackgroundGradient", 1f);
+                }
+            }
+
+            if (layers.Image != null)
+            {
+                var go = NewUI("RevnixBackgroundPhoto", parent);
+                Fill((RectTransform)go.transform);
+                var raw = go.AddComponent<RawImage>();
+                raw.raycastTarget = false;
+                raw.color = new Color(1f, 1f, 1f, (float)layers.Image.Opacity);
+                // Nothing to show until the fetch lands; enabling an empty
+                // RawImage paints a white box over the ground.
+                raw.enabled = false;
+                var loader = go.AddComponent<RevnixBackgroundPhoto>();
+                loader.Configure(raw, layers.Image);
+            }
+
+            if (layers.Overlay != null)
+            {
+                var opacity = (float)layers.Overlay.Opacity;
+                var gradients = RevnixBackground.ParseGradients(
+                    layers.Overlay.Fill,
+                    value => RevnixBlockColor.Resolve(value, _doc).HasValue);
+                if (gradients.Count > 0)
+                {
+                    foreach (var gradient in gradients)
+                    {
+                        AddGradient(gradient, parent, "RevnixBackgroundScrim", opacity);
+                    }
+                }
+                else
+                {
+                    var solid = RevnixBlockColor.Resolve(layers.Overlay.Fill, _doc);
+                    if (solid.HasValue)
+                    {
+                        var go = NewUI("RevnixBackgroundScrim", parent);
+                        Fill((RectTransform)go.transform);
+                        var image = go.AddComponent<Image>();
+                        var c = solid.Value;
+                        image.color = new Color(c.R, c.G, c.B, c.A * opacity);
+                        image.raycastTarget = false;
+                    }
+                }
+            }
+        }
+
+        private void AddGradient(RevnixGradient gradient, Transform parent, string name, float opacity)
+        {
+            var texture = RevnixGradientTexture.Bake(
+                gradient,
+                value =>
+                {
+                    var resolved = RevnixBlockColor.Resolve(value, _doc);
+                    if (!resolved.HasValue) return null;
+                    var c = resolved.Value;
+                    return new Color(c.R, c.G, c.B, c.A);
+                });
+            if (texture == null) return;
+            var go = NewUI(name, parent);
+            Fill((RectTransform)go.transform);
+            var raw = go.AddComponent<RawImage>();
+            raw.texture = texture;
+            raw.color = new Color(1f, 1f, 1f, opacity);
+            raw.raycastTarget = false;
+            // The baked texture is unmanaged and belongs to this object alone.
+            go.AddComponent<RevnixOwnedTexture>().Own(texture);
         }
 
         private Color Color(string value, Color fallback)

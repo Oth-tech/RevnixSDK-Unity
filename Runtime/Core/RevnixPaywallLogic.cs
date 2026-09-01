@@ -53,6 +53,20 @@ namespace Revnix
         public string PackageId;
         public string Title;
         public string PriceLabel;
+
+        /// <summary>Renewal cycle from the product ("annual", "monthly",
+        /// "weekly", …). Drives the {period} / {period_short} tags on a
+        /// designed paywall; null for lifetime and one-time products.</summary>
+        public string Period;
+
+        /// <summary>The store's price in MINOR units, with its currency — what
+        /// {price_per_month} and {save_percent} are computed from. Leave them
+        /// null and those tags stay visible rather than resolving to a wrong
+        /// number; see <see cref="RevnixPaywallTags.MinorUnits"/> before
+        /// converting from major units.</summary>
+        public long? AmountMinor;
+
+        public string Currency;
     }
 
     /// <summary>The screen structures ResolveLayout maps a config's template

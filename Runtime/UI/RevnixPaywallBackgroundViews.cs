@@ -12,6 +12,7 @@
 // force: the square texture stretches to the box along with everything else.
 
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
@@ -166,9 +167,31 @@ namespace Revnix.Unity.UI
             _spec = spec;
         }
 
+        /// <summary>
+        /// Decoded backgrounds, by URL. A designed paywall redraws its whole
+        /// tree whenever the selection changes, which destroys and recreates
+        /// this component — without the cache every plan tap refetched the
+        /// background and flashed the screen to its flat ground colour. Bounded
+        /// by the number of distinct backgrounds a session shows (normally
+        /// one), and the textures it holds are deliberately not destroyed with
+        /// the component that first loaded them.
+        /// </summary>
+        private static readonly Dictionary<string, Texture2D> Cached =
+            new Dictionary<string, Texture2D>();
+
         private IEnumerator Start()
         {
             if (_target == null || _spec == null || string.IsNullOrEmpty(_spec.Url)) yield break;
+
+            if (Cached.TryGetValue(_spec.Url, out var cached) && cached != null)
+            {
+                _texture = cached;
+                _target.texture = cached;
+                _target.enabled = true;
+                Place();
+                yield break;
+            }
+
             var request = UnityWebRequestTexture.GetTexture(_spec.Url);
             _request = request;
             yield return request.SendWebRequest();
@@ -176,6 +199,7 @@ namespace Revnix.Unity.UI
             if (request.result == UnityWebRequest.Result.Success)
             {
                 _texture = DownloadHandlerTexture.GetContent(request);
+                Cached[_spec.Url] = _texture;
                 _target.texture = _texture;
                 _target.enabled = true;
                 Place();
@@ -196,8 +220,9 @@ namespace Revnix.Unity.UI
             if (_texture != null)
             {
                 if (_target != null) _target.texture = null;
-                if (Application.isPlaying) Destroy(_texture);
-                else DestroyImmediate(_texture);
+                // The texture is shared through Cached so the next redraw can
+                // reuse it, so it outlives this component rather than being
+                // destroyed with it.
                 _texture = null;
             }
         }

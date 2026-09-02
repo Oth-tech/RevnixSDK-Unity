@@ -65,6 +65,13 @@ namespace Revnix.Unity.UI
         /// none.</summary>
         public Action OnClose;
 
+        /// <summary>Where the renderer reports a paint string it could not
+        /// read. Local only — it never leaves the device. The screen still
+        /// draws (a fill falls back to a colour from the design), so this is
+        /// the only way a host learns that a paywall is rendering
+        /// approximately.</summary>
+        public Action<string> OnDiagnostic;
+
         public Font Font;
     }
 
@@ -78,6 +85,9 @@ namespace Revnix.Unity.UI
     {
         private readonly BlockRenderContext _ctx;
         private readonly PaywallBlockDoc _doc;
+        /// <summary>Paint strings already reported, so one is not sent once per
+        /// block that uses it. See <see cref="Diagnostic"/>.</summary>
+        private readonly HashSet<string> _reported = new HashSet<string>();
 
         public RevnixPaywallBlockRenderer(BlockRenderContext ctx)
         {
@@ -361,11 +371,13 @@ namespace Revnix.Unity.UI
             // accented thing on the screen, or a "Not now" competes with
             // "Subscribe" for the eye.
             var closes = block.Action == BlockAction.Close && _ctx.OnClose != null;
-            image.color = Color(
+            var buttonGradients = FillGradients(block.Style?.Fill);
+            image.color = FillColor(
                 block.Style?.Fill,
                 closes
                     ? new UnityEngine.Color(0f, 0f, 0f, 0f)
-                    : Color(_doc.Accent, UnityEngine.Color.blue));
+                    : Color(_doc.Accent, UnityEngine.Color.blue),
+                buttonGradients);
 
             var button = go.AddComponent<Button>();
             button.targetGraphic = image;
@@ -391,7 +403,7 @@ namespace Revnix.Unity.UI
             text.text = RevnixPaywallTags.Resolve(block.Label ?? "", pkg, _ctx.Packages);
             text.fontSize = (int)Math.Round(block.Style?.FontSize ?? 15);
             text.fontStyle = FontStyle.Bold;
-            text.color = Color(
+            text.color = FillColor(
                 block.Style?.TextColor,
                 closes
                     ? Color(_doc.TextColor, UnityEngine.Color.white)
@@ -402,6 +414,8 @@ namespace Revnix.Unity.UI
             var height = block.Style?.Height?.Px;
             Le(go).preferredHeight = height.HasValue ? (float)height.Value : 52f;
             ApplyBox(go, block.Style, paint: false, skipHeight: true);
+            // After the label, so the gradient sits behind it rather than over.
+            PaintFillGradients(go, buttonGradients, block.Style?.Radius ?? 12);
             return go;
         }
 
@@ -468,12 +482,15 @@ namespace Revnix.Unity.UI
         {
             var go = NewUI("Line", parent);
             var image = go.AddComponent<Image>();
-            var color = Color(block.Style?.Fill, Color(_doc.TextColor, UnityEngine.Color.white));
+            var lineGradients = FillGradients(block.Style?.Fill);
+            var color = FillColor(
+                block.Style?.Fill, Color(_doc.TextColor, UnityEngine.Color.white), lineGradients);
             if (block.Style?.Fill == null) color.a *= 0.16f;
             image.color = color;
             image.raycastTarget = false;
             var height = block.Style?.Height?.Px ?? 1;
             Le(go).preferredHeight = (float)height;
+            PaintFillGradients(go, lineGradients, block.Style?.Radius);
             return go;
         }
 
@@ -895,7 +912,7 @@ namespace Revnix.Unity.UI
             text.fontStyle = weight >= 600
                 ? (italic ? FontStyle.BoldAndItalic : FontStyle.Bold)
                 : (italic ? FontStyle.Italic : FontStyle.Normal);
-            text.color = Color(style?.TextColor, Color(_doc.TextColor, UnityEngine.Color.white));
+            text.color = FillColor(style?.TextColor, Color(_doc.TextColor, UnityEngine.Color.white));
             text.alignment = style?.Align == "center" ? TextAnchor.UpperCenter
                 : style?.Align == "right" ? TextAnchor.UpperRight : TextAnchor.UpperLeft;
             text.horizontalOverflow = style?.Nowrap == true
@@ -934,8 +951,11 @@ namespace Revnix.Unity.UI
                         image.type = Image.Type.Sliced;
                     }
                 }
-                image.color = Color(style.Fill ?? style.BorderColor, UnityEngine.Color.clear);
+                var paintValue = style.Fill ?? style.BorderColor;
+                var gradients = FillGradients(paintValue);
+                image.color = FillColor(paintValue, UnityEngine.Color.clear, gradients);
                 image.raycastTarget = false;
+                PaintFillGradients(go, gradients, style.Radius);
             }
 
             var padLeft = style.PaddingLeft ?? style.PaddingX ?? style.Padding;
@@ -1035,7 +1055,7 @@ namespace Revnix.Unity.UI
             }
         }
 
-        private void AddGradient(RevnixGradient gradient, Transform parent, string name, float opacity)
+        private GameObject AddGradient(RevnixGradient gradient, Transform parent, string name, float opacity)
         {
             var texture = RevnixGradientTexture.Bake(
                 gradient,
@@ -1046,7 +1066,7 @@ namespace Revnix.Unity.UI
                     var c = resolved.Value;
                     return new Color(c.R, c.G, c.B, c.A);
                 });
-            if (texture == null) return;
+            if (texture == null) return null;
             var go = NewUI(name, parent);
             Fill((RectTransform)go.transform);
             var raw = go.AddComponent<RawImage>();
@@ -1055,6 +1075,119 @@ namespace Revnix.Unity.UI
             raw.raycastTarget = false;
             // The baked texture is unmanaged and belongs to this object alone.
             go.AddComponent<RevnixOwnedTexture>().Own(texture);
+            return go;
+        }
+
+        /// <summary>
+        /// Paints a block's gradient fill as layers behind its content.
+        ///
+        /// <para>
+        /// UGUI's Image takes one flat colour, so a gradient cannot live on the
+        /// box's own graphic: it is baked and shown in RawImage children.
+        /// Sibling order is paint order, so the layers are moved to the FRONT of
+        /// the child list — after the box's own Image (the flat base the fill
+        /// collapses to) and before everything the design put inside it. They
+        /// are marked ignoreLayout so a layout group treats them as paint
+        /// rather than as another item to lay out.
+        /// </para>
+        ///
+        /// <para>
+        /// Call this AFTER the block's children exist, or the layers land
+        /// behind nothing and paint over the content.
+        /// </para>
+        /// </summary>
+        private void PaintFillGradients(GameObject go, List<RevnixGradient> gradients, double? radius)
+        {
+            if (go == null || gradients == null || gradients.Count == 0) return;
+            for (var i = 0; i < gradients.Count; i++)
+            {
+                var layer = AddGradient(gradients[i], go.transform, "RevnixBlockFill", 1f);
+                if (layer == null) continue;
+                var element = layer.GetComponent<LayoutElement>();
+                if (element == null) element = layer.AddComponent<LayoutElement>();
+                element.ignoreLayout = true;
+                layer.transform.SetSiblingIndex(i);
+            }
+            ClipToRoundedBox(go, radius);
+        }
+
+        /// <summary>
+        /// Clips a box's gradient layers to its corner radius.
+        ///
+        /// <para>
+        /// A baked gradient is a stretched RawImage with square corners, so a
+        /// rounded card filled with one would show them. UGUI's stencil Mask
+        /// uses the GameObject's OWN graphic as the shape, which here is the
+        /// rounded sliced sprite ApplyBox already put there —
+        /// <c>showMaskGraphic</c> keeps that sprite visible so the mask costs
+        /// nothing visually and only clips what is inside.
+        /// </para>
+        ///
+        /// <para>
+        /// Only ever added for a rounded box that actually has gradient layers:
+        /// a mask also clips the block's CONTENT, and stencil masks nest only
+        /// eight deep, so it is not something to hand out freely.
+        /// </para>
+        /// </summary>
+        private static void ClipToRoundedBox(GameObject go, double? radius)
+        {
+            if (!radius.HasValue || radius.Value <= 0) return;
+            if (go.GetComponent<Image>() == null) return;
+            if (go.GetComponent<Mask>() != null) return;
+            var mask = go.AddComponent<Mask>();
+            mask.showMaskGraphic = true;
+        }
+
+        /// <summary>
+        /// The FLAT colour a fill paints — a plain colour as-is, and for
+        /// anything else the colour it collapses to. Never black unless the
+        /// design asked for black.
+        /// </summary>
+        ///
+        /// <para>
+        /// A fill with gradient layers answers with <c>UnityEngine.Color.clear</c>:
+        /// the layers carry their own alpha, and 83 of the library's 139
+        /// gradient fills fade through a translucent stop — they are drawn over
+        /// the screen's art precisely so it shows through, and a flat base
+        /// under them would make every one a solid block.
+        /// </para>
+        private Color FillColor(string fill, Color fallback, List<RevnixGradient> gradients = null)
+        {
+            if (string.IsNullOrEmpty(fill)) return fallback;
+            if (gradients != null && gradients.Count > 0) return UnityEngine.Color.clear;
+            var resolved = RevnixBlockColor.ResolveFlat(fill, _doc, Diagnostic);
+            if (!resolved.HasValue) return fallback;
+            var c = resolved.Value;
+            return new Color(c.R, c.G, c.B, c.A);
+        }
+
+        /// <summary>
+        /// The gradient layers of a fill, bottom first. Empty for a plain
+        /// colour — and for a form this build cannot read, which is reported
+        /// once, here, rather than again by every colour path that touches it.
+        /// </summary>
+        private List<RevnixGradient> FillGradients(string fill)
+        {
+            if (string.IsNullOrEmpty(fill)) return null;
+            if (RevnixBlockColor.Resolve(fill, _doc).HasValue) return null;
+            var gradients = RevnixBackground.ParseGradients(
+                fill, value => RevnixBlockColor.Resolve(value, _doc).HasValue);
+            return gradients.Count > 0 ? gradients : null;
+        }
+
+        /// <summary>
+        /// Reports a paint string this build could not read, ONCE per screen.
+        ///
+        /// A design usually reuses the same fill across a dozen blocks, and the
+        /// renderer redraws on every selection change — without the guard a
+        /// single unreadable value would arrive at the host's sink dozens of
+        /// times per tap, which buries it rather than surfacing it.
+        /// </summary>
+        private void Diagnostic(string message)
+        {
+            if (_ctx.OnDiagnostic == null) return;
+            if (!_reported.Add(message)) return;
+            _ctx.OnDiagnostic(message);
         }
 
         private Color Color(string value, Color fallback)

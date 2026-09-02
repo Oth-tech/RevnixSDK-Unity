@@ -762,6 +762,17 @@ namespace Revnix
             PersistQueue(items);
         }
 
+        /// <summary>
+        /// A block paywall reporting a paint string it could not read. Routed
+        /// to the same sink as every other swallowed failure, so a host that
+        /// already wired <c>OnDiagnostic</c> needs no new wiring to see render
+        /// fallbacks.
+        /// </summary>
+        public void ReportRenderDiagnostic(string message)
+        {
+            Diagnostic("paywall.render", message);
+        }
+
         private void Diagnostic(string op, string message)
         {
             _config.OnDiagnostic?.Invoke(new RevnixDiagnostic(op, message));

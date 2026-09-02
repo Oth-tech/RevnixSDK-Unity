@@ -942,11 +942,14 @@ namespace Revnix
                 {
                     case "accent": raw = doc.Accent; break;
                     case "accentInk": raw = doc.AccentInk; break;
-                    // The raw ground, gradient and all — exactly what the
-                    // dashboard answers `@bg` with. A gradient is not a colour,
-                    // so ParseColor returns null and the caller keeps its own
-                    // default, which is what the builder shows.
-                    case "bg": raw = doc.Background; break;
+                    // The ground's FLAT base colour, which is what the
+                    // dashboard answers `@bg` with: it feeds the token into
+                    // color-mix(), which cannot take a gradient, so it collapses
+                    // a gradient ground to one colour first. Handing the raw
+                    // gradient here instead made every `@bg` stop inside a
+                    // gradient drop out — and a gradient left with one stop does
+                    // not parse at all, so the whole fill was lost.
+                    case "bg": raw = RevnixBackground.BaseColor(doc.Background); break;
                     case "text": raw = doc.TextColor; break;
                     default: return null;
                 }
@@ -959,11 +962,78 @@ namespace Revnix
             return c;
         }
 
-        /// <summary>Parses "#rgb", "#rrggbb", "#rrggbbaa", "rgb()" and "rgba()".</summary>
+        /// <summary>
+        /// A field that can only ever be ONE colour — a border, text, an icon.
+        /// <para>
+        /// A gradient there has no native form (nor a CSS one: border-color
+        /// takes no gradient, so the dashboard drops the declaration outright).
+        /// Collapsing it to the colour it stands for keeps the stroke or the
+        /// glyph visible, which is nearer the design's intent than losing it.
+        /// </para>
+        /// </summary>
+        public static Rgba? ResolveFlat(string value, PaywallBlockDoc doc, Action<string> onDiagnostic = null)
+        {
+            if (string.IsNullOrEmpty(value)) return null;
+            // Whitespace is "no value", not "a value we failed to read": the
+            // fallback below answers an EMPTY string with the default ground,
+            // which is black — the very outcome this whole path exists to stop.
+            var raw = value.Trim();
+            if (raw.Length == 0) return null;
+            var resolved = Resolve(value, doc);
+            if (resolved.HasValue) return resolved;
+            var gradients = RevnixBackground.ParseGradients(raw, v => Resolve(v, doc).HasValue);
+            var baseStop = GradientBaseColor(gradients, doc);
+            if (baseStop.HasValue)
+            {
+                if (onDiagnostic != null)
+                {
+                    onDiagnostic("gradient flattened in a colour-only field: " + raw);
+                }
+                return baseStop;
+            }
+            if (onDiagnostic != null) onDiagnostic("unreadable colour " + raw);
+            // A pattern paints nothing rather than a stripe colour spread over
+            // the whole box.
+            if (RevnixBackground.IsRepeatingPattern(raw)) return null;
+            return Resolve(RevnixBackground.BaseColor(raw), doc);
+        }
+
+        /// <summary>
+        /// The flat colour a parsed gradient stack stands in for: the first stop
+        /// of the BOTTOM layer that is not fully transparent. It is what shows
+        /// through a translucent stop, and what stays on screen if a layer fails
+        /// to bake.
+        /// </summary>
+        public static Rgba? GradientBaseColor(List<RevnixGradient> gradients, PaywallBlockDoc doc)
+        {
+            if (gradients == null || gradients.Count == 0) return null;
+            var stops = gradients[0].Stops;
+            Rgba? first = null;
+            foreach (var stop in stops)
+            {
+                var parsed = Resolve(stop.Color, doc);
+                if (!parsed.HasValue) continue;
+                if (!first.HasValue) first = parsed;
+                if (parsed.Value.A > 0f) return parsed;
+            }
+            return first;
+        }
+
+        /// <summary>
+        /// Parses "#rgb", "#rrggbb", "#rrggbbaa", "rgb()", "rgba()" and
+        /// <c>transparent</c>.
+        /// </summary>
         public static Rgba? ParseColor(string value)
         {
             if (string.IsNullOrEmpty(value)) return null;
             var s = value.Trim();
+            // `transparent` appears in the shipped designs' gradient stops.
+            // Rejecting it dropped the stop, and a gradient left with one stop
+            // does not parse at all.
+            if (string.Equals(s, "transparent", StringComparison.OrdinalIgnoreCase))
+            {
+                return new Rgba { R = 0f, G = 0f, B = 0f, A = 0f };
+            }
             if (s.Length > 0 && s[0] == '#')
             {
                 var hex = s.Substring(1);

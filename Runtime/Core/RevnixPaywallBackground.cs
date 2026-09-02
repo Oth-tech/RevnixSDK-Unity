@@ -238,10 +238,9 @@ namespace Revnix
         /// itself. Fully transparent stops are skipped for the same reason.
         /// </para>
         /// <para>
-        /// This is NOT what `@bg` resolves to. The dashboard answers that
-        /// token with the raw ground, which color-mix() cannot take when it is
-        /// a gradient, so a `@bg` tint over a gradient renders nothing in the
-        /// builder — and must render nothing here too.
+        /// This is ALSO what `@bg` resolves to: the dashboard feeds that token
+        /// into color-mix(), which cannot take a gradient, so it collapses a
+        /// gradient ground to one colour exactly as this does.
         /// </para>
         /// </summary>
         public static string BaseColor(string ground)
@@ -259,6 +258,30 @@ namespace Revnix
                 if (parsed.HasValue && parsed.Value.A > 0) return match.Value;
             }
             return matches[0].Value;
+        }
+
+        /// <summary>
+        /// Whether a paint string's BOTTOM layer is a repeating pattern.
+        /// <para>
+        /// A <c>repeating-*</c> gradient is a TEXTURE, and the colours inside it
+        /// are stripe colours rather than the surface's. When a build cannot
+        /// draw one, painting a colour lifted out of its arguments across the
+        /// whole box is a WRONG answer rather than a degraded one — the
+        /// library's hairline grid is one colour every 26px, and as a solid fill
+        /// it is a slab. Such a fill paints nothing instead.
+        /// </para>
+        /// <para>
+        /// The bottom layer decides, so a pattern stacked over a real ground
+        /// still falls back to that ground.
+        /// </para>
+        /// </summary>
+        public static bool IsRepeatingPattern(string css)
+        {
+            var s = (css ?? string.Empty).Trim();
+            if (s.Length == 0) return false;
+            var layers = SplitTopLevel(s);
+            var bottom = layers.Count == 0 ? s : layers[layers.Count - 1];
+            return bottom.StartsWith("repeating-", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -324,33 +347,54 @@ namespace Revnix
             public double? Position;
         }
 
-        private static bool TryParseStop(string raw, Func<string, bool> isColor, out RawStop stop)
+        /// <summary>
+        /// One argument of a gradient's stop list, as the stop(s) it stands for.
+        /// <para>
+        /// The positions are the trailing <c>&lt;n&gt;%</c> (or a unitless
+        /// <c>0</c>); everything before them is the colour, which may itself
+        /// contain spaces (<c>rgba(0, 0, 0, 0.5)</c>). CSS allows TWO positions
+        /// on one stop — <c>@accent 0 22%</c> is the same colour at both, the
+        /// hard edge the library's progress bars and split panels are drawn
+        /// with — so this answers with a list rather than a single stop.
+        /// </para>
+        /// </summary>
+        private static List<RawStop> ParseStops(string raw, Func<string, bool> isColor)
         {
-            stop = default;
-            var s = (raw ?? string.Empty).Trim();
-            if (s.Length == 0) return false;
-            // The position is the trailing `<n>%`; everything before it is the
-            // colour, which may itself contain spaces (`rgba(0, 0, 0, 0.5)`).
-            var match = Regex.Match(s, @"\s+(-?[0-9.]+)%\s*$");
-            if (match.Success)
+            var out_ = new List<RawStop>();
+            var body = (raw ?? string.Empty).Trim();
+            if (body.Length == 0) return out_;
+            var positions = new List<double>();
+            while (positions.Count < 2)
             {
-                var color = s.Substring(0, match.Index).Trim();
-                if (!isColor(color)) return false;
-                double? position = null;
-                if (double.TryParse(
-                        match.Groups[1].Value,
-                        NumberStyles.Float,
-                        CultureInfo.InvariantCulture,
-                        out var pct))
-                {
-                    position = Math.Max(0, Math.Min(1, pct / 100));
-                }
-                stop = new RawStop { Color = color, Position = position };
-                return true;
+                var match = Regex.Match(body, @"\s(-?[0-9.]+%|0)\s*$");
+                if (!match.Success) break;
+                var text = match.Groups[1].Value;
+                var isPercent = text.EndsWith("%", StringComparison.Ordinal);
+                var parsed = double.TryParse(
+                    isPercent ? text.Substring(0, text.Length - 1) : text,
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out var value);
+                // The token comes off `body` either way. Leaving a position
+                // this build could not read attached to the colour made the
+                // colour unparseable too, which dropped the whole stop — and a
+                // gradient left with one stop does not parse at all. A
+                // malformed position is worth losing; the stop is not.
+                body = body.Substring(0, match.Index).Trim();
+                if (!parsed) break;
+                positions.Insert(0, Math.Max(0, Math.Min(1, isPercent ? value / 100 : value)));
             }
-            if (!isColor(s)) return false;
-            stop = new RawStop { Color = s, Position = null };
-            return true;
+            if (body.Length == 0 || !isColor(body)) return out_;
+            if (positions.Count == 0)
+            {
+                out_.Add(new RawStop { Color = body, Position = null });
+                return out_;
+            }
+            foreach (var position in positions)
+            {
+                out_.Add(new RawStop { Color = body, Position = position });
+            }
+            return out_;
         }
 
         /// <summary>Fills in the positions CSS would interpolate.</summary>
@@ -490,7 +534,7 @@ namespace Revnix
             var stops = new List<RawStop>();
             for (var i = first; i < args.Count; i++)
             {
-                if (TryParseStop(args[i], isColor, out var stop)) stops.Add(stop);
+                stops.AddRange(ParseStops(args[i], isColor));
             }
             return stops;
         }

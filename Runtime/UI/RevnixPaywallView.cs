@@ -272,6 +272,7 @@ namespace Revnix.Unity.UI
                     OnTerms = _options.OnTerms,
                     OnPrivacy = _options.OnPrivacy,
                     OnClose = _options.OnClose == null ? null : (Action)CloseAndReport,
+                    OnDiagnostic = RenderDiagnostic(),
                     Font = _font,
                 }).Build(transform);
                 return true;
@@ -283,6 +284,23 @@ namespace Revnix.Unity.UI
                 for (var i = transform.childCount - 1; i >= 0; i--) Destroy(transform.GetChild(i).gameObject);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// The renderer's diagnostic sink, or null when the host wired neither
+        /// a client nor a callback — in which case building a message nobody
+        /// will read is pure waste, and the null is what suppresses it.
+        /// </summary>
+        private Action<string> RenderDiagnostic()
+        {
+            var client = _options.Client;
+            var explicitSink = _options.OnDiagnostic;
+            if (client == null && explicitSink == null) return null;
+            return message =>
+            {
+                if (client != null) client.ReportRenderDiagnostic(message);
+                if (explicitSink != null) explicitSink(message);
+            };
         }
 
         private void OnDestroy()

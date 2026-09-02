@@ -60,5 +60,20 @@ namespace Revnix.Unity.UI
         /// <summary>Opt out of the automatic view report while still passing
         /// `Client`.</summary>
         public bool DisableViewTracking;
+
+        /// <summary>
+        /// Reports a paint string the designed renderer could not read — a
+        /// fill, border or text colour in a form this SDK version does not
+        /// understand.
+        /// <para>
+        /// Local only: nothing is sent anywhere. The screen still draws (an
+        /// unreadable fill falls back to a colour from the design rather than
+        /// to black), so this is the only way to learn that a paywall is
+        /// rendering approximately. Setting <see cref="Client"/> routes the
+        /// same reports to that client's own <c>OnDiagnostic</c>, so most apps
+        /// need neither.
+        /// </para>
+        /// </summary>
+        public Action<string> OnDiagnostic;
     }
 }

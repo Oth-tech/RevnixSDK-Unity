@@ -11,6 +11,7 @@
 // ellipse CSS asks for rather than the circle a platform gradient API would
 // force: the square texture stretches to the box along with everything else.
 
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -144,13 +145,12 @@ namespace Revnix.Unity.UI
     }
 
     /// <summary>
-    /// Loads the background photo.
+    /// Loads a photo into a RawImage — the screen background, and since
+    /// render contract v2 the design's `image` blocks as well.
     /// <para>
-    /// Image loading is otherwise the host project's job in this package — it
-    /// ships no downloader for block art — but a background the designer chose
-    /// is not optional decoration, so the same UnityWebRequestTexture fetch the
-    /// legacy paywall uses for its hero is reused here. A failed load leaves the
-    /// ground and scrim in place rather than blacking out the screen.
+    /// The same UnityWebRequestTexture fetch the legacy paywall uses for its
+    /// hero. A failed load leaves whatever is underneath in place (the ground
+    /// and scrim, an image slot's placeholder) rather than blacking it out.
     /// </para>
     /// </summary>
     public sealed class RevnixBackgroundPhoto : MonoBehaviour
@@ -159,6 +159,14 @@ namespace Revnix.Unity.UI
         private RevnixBackgroundImage _spec;
         private UnityWebRequest _request;
         private Texture2D _texture;
+
+        /// <summary>Runs once the texture is showing — from the cache or the
+        /// network. An image slot hides its placeholder here.</summary>
+        public Action OnLoaded;
+
+        /// <summary>Runs when there is nothing to show: no URL, or the fetch
+        /// failed. The placeholder stays.</summary>
+        public Action OnFailed;
 
         /// <summary>Called before the object is enabled, so Start does the work.</summary>
         public void Configure(RawImage target, RevnixBackgroundImage spec)
@@ -181,7 +189,11 @@ namespace Revnix.Unity.UI
 
         private IEnumerator Start()
         {
-            if (_target == null || _spec == null || string.IsNullOrEmpty(_spec.Url)) yield break;
+            if (_target == null || _spec == null || string.IsNullOrEmpty(_spec.Url))
+            {
+                if (OnFailed != null) OnFailed();
+                yield break;
+            }
 
             if (Cached.TryGetValue(_spec.Url, out var cached) && cached != null)
             {
@@ -189,6 +201,7 @@ namespace Revnix.Unity.UI
                 _target.texture = cached;
                 _target.enabled = true;
                 Place();
+                if (OnLoaded != null) OnLoaded();
                 yield break;
             }
 
@@ -196,15 +209,28 @@ namespace Revnix.Unity.UI
             _request = request;
             yield return request.SendWebRequest();
             _request = null;
+            var loaded = false;
             if (request.result == UnityWebRequest.Result.Success)
             {
                 _texture = DownloadHandlerTexture.GetContent(request);
                 Cached[_spec.Url] = _texture;
-                _target.texture = _texture;
-                _target.enabled = true;
-                Place();
+                if (_target != null)
+                {
+                    _target.texture = _texture;
+                    _target.enabled = true;
+                    Place();
+                    loaded = true;
+                }
             }
             request.Dispose();
+            if (loaded)
+            {
+                if (OnLoaded != null) OnLoaded();
+            }
+            else if (OnFailed != null)
+            {
+                OnFailed();
+            }
         }
 
         private void OnRectTransformDimensionsChange() => Place();

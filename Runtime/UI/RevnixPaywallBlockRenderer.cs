@@ -28,6 +28,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace Revnix.Unity.UI
@@ -38,9 +39,15 @@ namespace Revnix.Unity.UI
         public PaywallBlockDoc Doc;
         public List<BlockPackage> Packages = new List<BlockPackage>();
 
-        /// <summary>The package a plan card visually emphasizes, and the one
-        /// whose tags a subtree resolves against outside a `repeat`.</summary>
+        /// <summary>The selected package (render contract v2): what pinned
+        /// and repeated cards compare themselves against, what the CTA buys,
+        /// and what tags outside any package card resolve with. Falls back to
+        /// the first offered package when null or not offered.</summary>
         public string SelectedPackageId;
+
+        /// <summary>Host `loading`: purchase buttons go inert and show a
+        /// spinner in place of their label. Close buttons are unaffected.</summary>
+        public bool Loading;
 
         /// <summary>Fills an image block that publishes no URL of its own.</summary>
         public string HeroImageUrl;
@@ -89,10 +96,17 @@ namespace Revnix.Unity.UI
         /// block that uses it. See <see cref="Diagnostic"/>.</summary>
         private readonly HashSet<string> _reported = new HashSet<string>();
 
+        /// <summary>The selected package id, validated against the offering
+        /// (see <see cref="RevnixPaywallSelection.ResolveSelectedPackageId"/>).
+        /// Null only when nothing is offered.</summary>
+        private readonly string _selected;
+
         public RevnixPaywallBlockRenderer(BlockRenderContext ctx)
         {
             _ctx = ctx;
             _doc = ctx.Doc;
+            _selected = RevnixPaywallSelection.ResolveSelectedPackageId(
+                ctx.Packages, ctx.SelectedPackageId, null, null);
         }
 
         /// <summary>
@@ -119,35 +133,87 @@ namespace Revnix.Unity.UI
             background.raycastTarget = false;
             BuildBackgroundArt(layers, screen.transform);
 
-            var body = NewUI("Blocks", screen.transform);
-            var bodyRt = (RectTransform)body.transform;
+            // The scroll scaffold (render contract v2, section 3). Both
+            // layouts sit in a vertical ScrollRect with no scrollbars: a
+            // `canvas` design scrolls only when its scaled height is taller
+            // than the viewport, a `flow` design when its column is; either is
+            // pinned to the top and does not bounce when it fits
+            // (RevnixScrollWhenOverflowing). The background stays on the
+            // screen, outside the scroll, filling the whole view.
+            var scrollGo = NewUI("Scroll", screen.transform);
+            Fill((RectTransform)scrollGo.transform);
+            var scroll = scrollGo.AddComponent<ScrollRect>();
+            scroll.horizontal = false;
+            scroll.vertical = true;
+            scroll.movementType = ScrollRect.MovementType.Clamped;
 
+            var viewport = NewUI("Viewport", scrollGo.transform);
+            var viewportRt = (RectTransform)viewport.transform;
+            Fill(viewportRt);
+            viewport.AddComponent<RectMask2D>();
+            // A drag has to start over a raycast target, and the blocks' own
+            // text is not one, so the viewport carries an invisible surface
+            // that lets a swipe anywhere scroll.
+            var surface = viewport.AddComponent<Image>();
+            surface.color = UnityEngine.Color.clear;
+            surface.raycastTarget = true;
+
+            var content = NewUI("Content", viewport.transform);
+            var contentRt = (RectTransform)content.transform;
+            contentRt.anchorMin = new Vector2(0f, 1f);
+            contentRt.anchorMax = new Vector2(1f, 1f);
+            contentRt.pivot = new Vector2(0.5f, 1f);
+            contentRt.sizeDelta = Vector2.zero;
+            contentRt.anchoredPosition = Vector2.zero;
+
+            scroll.viewport = viewportRt;
+            scroll.content = contentRt;
+            var overflow = scrollGo.AddComponent<RevnixScrollWhenOverflowing>();
+            overflow.Scroll = scroll;
+
+            GameObject body;
             if (IsCanvas)
             {
-                // Laid out at the design size and scaled as a whole. The scale
-                // is applied against the live width, so it stays correct on any
-                // device rather than being baked at build time.
-                bodyRt.anchorMin = new Vector2(0f, 1f);
-                bodyRt.anchorMax = new Vector2(0f, 1f);
-                bodyRt.pivot = new Vector2(0f, 1f);
+                // Laid out at the design width and scaled as a whole, centred
+                // under the viewport's top edge. The scale is applied against
+                // the live viewport, so it stays correct on any device rather
+                // than being baked at build time (RevnixCanvasScaler).
+                body = NewUI("Blocks", content.transform);
+                var bodyRt = (RectTransform)body.transform;
+                bodyRt.anchorMin = new Vector2(0.5f, 1f);
+                bodyRt.anchorMax = new Vector2(0.5f, 1f);
+                bodyRt.pivot = new Vector2(0.5f, 1f);
+                bodyRt.anchoredPosition = Vector2.zero;
                 bodyRt.sizeDelta = new Vector2(PaywallBlockDoc.CanvasWidth, PaywallBlockDoc.CanvasHeight);
-                var fitter = screen.AddComponent<RevnixCanvasScaler>();
+                var fitter = viewport.AddComponent<RevnixCanvasScaler>();
                 fitter.Target = bodyRt;
+                fitter.Content = contentRt;
             }
             else
             {
-                Fill(bodyRt);
+                body = content;
                 var column = body.AddComponent<VerticalLayoutGroup>();
                 column.childControlWidth = true;
                 column.childControlHeight = true;
                 column.childForceExpandWidth = true;
                 column.childForceExpandHeight = false;
                 column.padding = new RectOffset(20, 20, 20, 20);
+                var sizer = body.AddComponent<ContentSizeFitter>();
+                sizer.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
             }
 
             foreach (var block in _doc.Blocks)
             {
-                Render(block, body.transform, null);
+                BlockStyle style;
+                var rendered = Render(block, body.transform, null, out style);
+                // The canvas root IS the device screen: a root block pins
+                // itself to it like a stack child, and one that names no
+                // placement fills it — which is what lets a taller viewport
+                // fill, with root cards following the body's height.
+                if (rendered != null && IsCanvas && !PlaceInStack(rendered, style))
+                {
+                    Fill((RectTransform)rendered.transform);
+                }
             }
             // Parented to the SCREEN, not the scaled body, so the fallback
             // close keeps its tap size and its distance from the screen edge
@@ -181,6 +247,10 @@ namespace Revnix.Unity.UI
             rt.pivot = new Vector2(1f, 1f);
             rt.sizeDelta = new Vector2(30f, 30f);
             rt.anchoredPosition = new Vector2(-14f, -14f);
+            // The canvas is full-bleed under the status bar; the chip moves
+            // down by the safe-area inset, in unscaled canvas units.
+            var inset = go.AddComponent<RevnixSafeAreaInset>();
+            inset.Margin = 14f;
 
             var image = go.AddComponent<Image>();
             var sprite = RevnixPaywallSprites.Rounded(15);
@@ -212,14 +282,42 @@ namespace Revnix.Unity.UI
 
         // ── blocks ────────────────────────────────────────────────────────
 
-        /// <summary>One block, or null when it contributes nothing.</summary>
+        /// <summary>
+        /// One block, or null when it contributes nothing — a kind this SDK
+        /// does not know, a pinned card the offering does not reach, or a
+        /// block whose `visibility` hides it in this context.
+        ///
+        /// <paramref name="pkg"/> is the package the enclosing card describes
+        /// (null at the root). The selected-context rules — which package a
+        /// pinned card compares against, whether `selectedStyle` merges,
+        /// whether the block draws at all — live in
+        /// <see cref="RevnixPaywallSelection"/>, so the style the block
+        /// actually drew with comes back through <paramref name="style"/>: a
+        /// selected merge can change its flex or its placement, and the
+        /// container that placed it must see the same style it was drawn with.
+        /// </summary>
+        private GameObject Render(PaywallBlock block, Transform parent, BlockPackage pkg, out BlockStyle style)
+        {
+            style = null;
+            var resolved = RevnixPaywallSelection.Resolve(block, pkg, _ctx.Packages, _selected);
+            if (resolved == null || !resolved.Visible) return null;
+            style = resolved.Block.Style;
+            return Draw(resolved, parent);
+        }
+
         private GameObject Render(PaywallBlock block, Transform parent, BlockPackage pkg)
         {
-            if (block == null) return null;
+            BlockStyle ignored;
+            return Render(block, parent, pkg, out ignored);
+        }
+
+        private GameObject Draw(BlockResolution resolved, Transform parent)
+        {
+            var block = resolved.Block;
             switch (block.Kind)
             {
                 case PaywallBlockKind.Text:
-                    return CloseOnTap(RenderText(block, parent, pkg), block.Action);
+                    return CloseOnTap(RenderText(block, parent, resolved.TagPackage), block.Action);
                 case PaywallBlockKind.Image:
                     return CloseOnTap(RenderImage(block, parent), block.Action);
                 case PaywallBlockKind.List:
@@ -227,7 +325,7 @@ namespace Revnix.Unity.UI
                 case PaywallBlockKind.Products:
                     return RenderProducts(block, parent);
                 case PaywallBlockKind.Button:
-                    return RenderButton(block, parent, pkg);
+                    return RenderButton(block, parent, resolved.TagPackage);
                 case PaywallBlockKind.Links:
                     return RenderLinks(block, parent);
                 case PaywallBlockKind.Line:
@@ -235,7 +333,7 @@ namespace Revnix.Unity.UI
                 case PaywallBlockKind.Spacer:
                     return RenderSpacer(block, parent);
                 case PaywallBlockKind.Card:
-                    return RenderCard(block, parent, pkg);
+                    return RenderCard(block, parent, resolved.Package);
                 default:
                     // A block type from a newer dashboard: skip it, keep the
                     // screen.
@@ -243,6 +341,9 @@ namespace Revnix.Unity.UI
             }
         }
 
+        /// <summary><paramref name="pkg"/> is the package the copy's tags
+        /// resolve against — the enclosing card's, or the selected package at
+        /// the root (contract v2, section 2).</summary>
         private GameObject RenderText(PaywallBlock block, Transform parent, BlockPackage pkg)
         {
             var go = NewUI("Text", parent);
@@ -252,26 +353,70 @@ namespace Revnix.Unity.UI
             return go;
         }
 
+        /// <summary>
+        /// An image slot. The photo loads through the same fetch and cache the
+        /// screen background uses (RevnixBackgroundPhoto), so a redraw on
+        /// every selection tap does not refetch it; the placeholder tint and
+        /// caption stay until it lands and remain if the fetch fails. A block
+        /// with no URL of its own takes the config's hero image, then the
+        /// placeholder alone.
+        /// </summary>
         private GameObject RenderImage(PaywallBlock block, Transform parent)
         {
-            // Image loading is the host project's job — this package ships no
-            // downloader for block art — so a slot draws as its placeholder
-            // box. A design that publishes a URL still reserves the space.
             var go = NewUI("Image", parent);
             var image = go.AddComponent<Image>();
             image.color = new Color32(125, 135, 155, 56);
             image.raycastTarget = false;
 
             var style = block.Style;
+            // The 160px default suits a slot dropped into a flow column; a
+            // converted design sizes its own slot, and the default must not
+            // fight it.
             var sized = style != null
                 && (style.Inset == true || style.Height.HasValue
-                    || style.AspectRatio.HasValue || style.Flex.HasValue);
-            if (!sized) Le(go).preferredHeight = 160f;
+                    || style.AspectRatio.HasValue || style.Flex.HasValue
+                    || (style.Top.HasValue && style.Bottom.HasValue));
+            if (!sized)
+            {
+                Le(go).preferredHeight = 160f;
+            }
+            else if (style.Height == null && style.Inset != true && !style.Flex.HasValue
+                && !(style.Top.HasValue && style.Bottom.HasValue)
+                && style.AspectRatio.HasValue && style.AspectRatio.Value.Ratio is double ratio && ratio > 0)
+            {
+                // Only an aspect ratio: the height follows the width the
+                // layout gives the slot.
+                var aspect = go.AddComponent<RevnixPaywallAspectHeight>();
+                aspect.Element = Le(go);
+                aspect.Ratio = (float)ratio;
+            }
 
+            // Shape: a circle, or the style's corner radius (16 by default on
+            // an unsized slot, like the dashboard), as a stencil mask on the
+            // slot's own graphic. The tint stays visible through the mask
+            // until the photo lands, and the mask then clips the photo alone.
+            var round = block.Shape == "circle";
+            var radius = (int)Math.Round(style?.Radius ?? (sized ? 0 : 16));
+            Mask mask = null;
+            if (round || radius > 0)
+            {
+                var shape = round
+                    ? RevnixPaywallSprites.Circle()
+                    : RevnixPaywallSprites.Rounded(Math.Min(radius, 64));
+                if (shape != null)
+                {
+                    image.sprite = shape;
+                    image.type = round ? Image.Type.Simple : Image.Type.Sliced;
+                    mask = go.AddComponent<Mask>();
+                    mask.showMaskGraphic = true;
+                }
+            }
+
+            GameObject caption = null;
             var label = !string.IsNullOrEmpty(block.Placeholder) ? block.Placeholder : block.Url;
             if (!string.IsNullOrEmpty(label))
             {
-                var caption = NewUI("Placeholder", go.transform);
+                caption = NewUI("Placeholder", go.transform);
                 Fill((RectTransform)caption.transform);
                 var text = caption.AddComponent<Text>();
                 if (_ctx.Font != null) text.font = _ctx.Font;
@@ -282,6 +427,35 @@ namespace Revnix.Unity.UI
                 text.horizontalOverflow = HorizontalWrapMode.Wrap;
                 text.verticalOverflow = VerticalWrapMode.Truncate;
                 text.raycastTarget = false;
+            }
+
+            var url = !string.IsNullOrEmpty(block.Url) ? block.Url : _ctx.HeroImageUrl;
+            if (!string.IsNullOrEmpty(url))
+            {
+                var photo = NewUI("Photo", go.transform);
+                Fill((RectTransform)photo.transform);
+                var raw = photo.AddComponent<RawImage>();
+                raw.raycastTarget = false;
+                // Nothing to show until the fetch lands; enabling an empty
+                // RawImage paints a white box over the placeholder.
+                raw.enabled = false;
+                var loader = photo.AddComponent<RevnixBackgroundPhoto>();
+                loader.Configure(raw, new RevnixBackgroundImage
+                {
+                    Url = url,
+                    Fit = block.Fit == "contain" ? RevnixBackgroundFit.Contain : RevnixBackgroundFit.Cover,
+                });
+                var slot = image;
+                var slotMask = mask;
+                var slotCaption = caption;
+                loader.OnLoaded = () =>
+                {
+                    if (slotCaption != null) slotCaption.SetActive(false);
+                    // A masked slot keeps its graphic (the mask needs its
+                    // alpha) but stops painting it; a plain slot just clears.
+                    if (slotMask != null) slotMask.showMaskGraphic = false;
+                    else if (slot != null) slot.color = UnityEngine.Color.clear;
+                };
             }
             ApplyBox(go, style, paint: false);
             return go;
@@ -380,7 +554,13 @@ namespace Revnix.Unity.UI
                 buttonGradients);
 
             var button = go.AddComponent<Button>();
+            // Pressed feedback is the whole button at 80% opacity (contract
+            // v2, section 4), applied through a CanvasGroup so the label and
+            // any gradient layers dim with the fill — UGUI's own ColorTint
+            // would tint the fill graphic alone.
+            button.transition = Selectable.Transition.None;
             button.targetGraphic = image;
+            go.AddComponent<RevnixPaywallPressOpacity>();
             if (closes)
             {
                 var onClose = _ctx.OnClose;
@@ -388,8 +568,7 @@ namespace Revnix.Unity.UI
             }
             else
             {
-                var selected = _ctx.SelectedPackageId
-                    ?? (_ctx.Packages.Count > 0 ? _ctx.Packages[0].PackageId : null);
+                var selected = _selected;
                 if (selected != null && _ctx.OnPurchase != null)
                 {
                     button.onClick.AddListener(() => _ctx.OnPurchase(selected));
@@ -403,13 +582,35 @@ namespace Revnix.Unity.UI
             text.text = RevnixPaywallTags.Resolve(block.Label ?? "", pkg, _ctx.Packages);
             text.fontSize = (int)Math.Round(block.Style?.FontSize ?? 15);
             text.fontStyle = FontStyle.Bold;
-            text.color = FillColor(
+            var ink = FillColor(
                 block.Style?.TextColor,
                 closes
                     ? Color(_doc.TextColor, UnityEngine.Color.white)
                     : Color(_doc.AccentInk, UnityEngine.Color.white));
+            text.color = ink;
             text.alignment = TextAnchor.MiddleCenter;
             text.raycastTarget = false;
+
+            if (_ctx.Loading && !closes)
+            {
+                // Loading: the purchase button goes inert, its label gives
+                // way to a spinner in the same ink, and it keeps its size and
+                // fill. The classic CTA's arc is reused.
+                button.interactable = false;
+                label.SetActive(false);
+                var spinner = NewUI("Spinner", go.transform);
+                var spinnerRt = (RectTransform)spinner.transform;
+                spinnerRt.anchorMin = new Vector2(0.5f, 0.5f);
+                spinnerRt.anchorMax = new Vector2(0.5f, 0.5f);
+                spinnerRt.pivot = new Vector2(0.5f, 0.5f);
+                spinnerRt.sizeDelta = new Vector2(20f, 20f);
+                spinnerRt.anchoredPosition = Vector2.zero;
+                var arc = spinner.AddComponent<Image>();
+                arc.sprite = RevnixPaywallSprites.Arc();
+                arc.color = ink;
+                arc.raycastTarget = false;
+                spinner.AddComponent<RevnixPaywallSpinner>();
+            }
 
             var height = block.Style?.Height?.Px;
             Le(go).preferredHeight = height.HasValue ? (float)height.Value : 52f;
@@ -513,7 +714,7 @@ namespace Revnix.Unity.UI
         private GameObject RenderProducts(PaywallBlock block, Transform parent)
         {
             var shown = _ctx.Packages;
-            var highlightId = _ctx.SelectedPackageId;
+            var highlightId = _selected;
             if (highlightId == null || !ContainsPackage(shown, highlightId))
             {
                 highlightId = shown.Count > 0 ? shown[0].PackageId : null;
@@ -683,7 +884,7 @@ namespace Revnix.Unity.UI
         /// </summary>
         private GameObject RenderCard(PaywallBlock block, Transform parent, BlockPackage pkg)
         {
-            if (block.Repeat == "packages")
+            if (RevnixPaywallSelection.IsRepeat(block))
             {
                 // One designed card, drawn per package. With nothing attached a
                 // single instance still draws, so the design stays visible.
@@ -695,51 +896,44 @@ namespace Revnix.Unity.UI
                 column.childForceExpandHeight = false;
                 column.spacing = (float)(block.Style?.Gap ?? 10);
 
-                var selected = _ctx.SelectedPackageId
-                    ?? (_ctx.Packages.Count > 0 ? _ctx.Packages[0].PackageId : null);
                 if (_ctx.Packages.Count == 0)
                 {
-                    Container(block, wrapper.transform, null, block.Style);
+                    var single = RevnixPaywallSelection.ResolveInstance(block, null, _ctx.Packages, _selected);
+                    if (single != null && single.Visible) Container(single.Block, wrapper.transform, null);
                 }
                 else
                 {
                     foreach (var each in _ctx.Packages)
                     {
-                        var style = each.PackageId == selected
-                            ? (block.Style ?? new BlockStyle()).Merging(block.SelectedStyle)
-                            : block.Style;
-                        var instance = Container(block, wrapper.transform, each, style);
-                        MakeSelectable(instance, each.PackageId);
+                        // Each instance decides its own context, so the
+                        // repeated card's `selectedStyle` and `visibility`
+                        // apply per package and its children inherit that.
+                        var instance = RevnixPaywallSelection.ResolveInstance(block, each, _ctx.Packages, _selected);
+                        if (instance == null || !instance.Visible) continue;
+                        var drawn = Container(instance.Block, wrapper.transform, each);
+                        MakeSelectable(drawn, each.PackageId);
                     }
                 }
                 return wrapper;
             }
 
-            // A card that names a package the offering does not reach is
-            // dropped rather than drawn with unresolved tags.
-            if (block.PackageIndex.HasValue && block.PackageIndex.Value >= _ctx.Packages.Count) return null;
-            var pinned = block.PackageIndex.HasValue
-                ? _ctx.Packages[block.PackageIndex.Value]
-                : null;
-            var ctxPackage = pinned ?? pkg;
-            // A card pinned to a package doubles as its selection target —
-            // that is how hand-styled plan rows (a highlighted annual beside a
-            // plain monthly) become tappable without a products block. It takes
-            // `selectedStyle` when selected for the same reason a repeated card
-            // does, or tapping it would change what the CTA buys with no
-            // visible answer. A card that names no package is decoration and
-            // stays inert.
-            var selected = _ctx.SelectedPackageId
-                ?? (_ctx.Packages.Count > 0 ? _ctx.Packages[0].PackageId : null);
-            var style = pinned != null && pinned.PackageId == selected
-                ? (block.Style ?? new BlockStyle()).Merging(block.SelectedStyle)
-                : block.Style;
-            var card = Container(block, parent, ctxPackage, style);
-            if (pinned != null) MakeSelectable(card, pinned.PackageId);
+            // Render already resolved this card: a pinned card arrives with its
+            // own package as `pkg` and its `selectedStyle` merged in while it
+            // is the selected one, and a card pinned past the offering never
+            // gets here. A pinned card doubles as its package's selection
+            // target — that is how hand-styled plan rows (a highlighted annual
+            // beside a plain monthly) become tappable without a products
+            // block. A card that names no package is decoration and stays
+            // inert.
+            var card = Container(block, parent, pkg);
+            if (RevnixPaywallSelection.IsPinned(block) && pkg != null) MakeSelectable(card, pkg.PackageId);
             return card;
         }
 
-        private GameObject Container(PaywallBlock block, Transform parent, BlockPackage pkg, BlockStyle style)
+        /// <summary>Draws a container with the style it carries — the
+        /// effective one, since <see cref="Render"/> merged any selected
+        /// style in before handing the block over.</summary>
+        private GameObject Container(PaywallBlock block, Transform parent, BlockPackage pkg)
         {
             var go = NewUI("Card", parent);
             var gap = (float)(block.Style?.Gap ?? 10);
@@ -753,8 +947,9 @@ namespace Revnix.Unity.UI
                 // describe.
                 foreach (var child in children)
                 {
-                    var rendered = Render(child, go.transform, pkg);
-                    if (rendered != null) PlaceInStack(rendered, child.Style);
+                    BlockStyle style;
+                    var rendered = Render(child, go.transform, pkg, out style);
+                    if (rendered != null) PlaceInStack(rendered, style);
                 }
             }
             else if (layout == "grid")
@@ -776,8 +971,9 @@ namespace Revnix.Unity.UI
                 row.childAlignment = RowAlignment(block.Style);
                 foreach (var child in children)
                 {
-                    var rendered = Render(child, go.transform, pkg);
-                    if (rendered != null) ApplyFlex(rendered, child.Style, horizontal: true);
+                    BlockStyle style;
+                    var rendered = Render(child, go.transform, pkg, out style);
+                    if (rendered != null) PlaceInFlow(rendered, style, horizontal: true);
                 }
             }
             else
@@ -792,12 +988,29 @@ namespace Revnix.Unity.UI
                 column.childAlignment = ColumnAlignment(block.Style);
                 foreach (var child in children)
                 {
-                    var rendered = Render(child, go.transform, pkg);
-                    if (rendered != null) ApplyFlex(rendered, child.Style, horizontal: false);
+                    BlockStyle style;
+                    var rendered = Render(child, go.transform, pkg, out style);
+                    if (rendered != null) PlaceInFlow(rendered, style, horizontal: false);
                 }
             }
-            ApplyBox(go, style, paint: true);
+            ApplyBox(go, block.Style, paint: true);
             return go;
+        }
+
+        /// <summary>
+        /// A child of a row or column: flex sizing — unless the design pins it
+        /// to an edge of its card. Every container is a positioning context in
+        /// the dashboard, so a SAVE badge pinned top/right anchors to its own
+        /// card and takes no slot in the flow.
+        /// </summary>
+        private static void PlaceInFlow(GameObject go, BlockStyle style, bool horizontal)
+        {
+            if (PlaceInStack(go, style))
+            {
+                Le(go).ignoreLayout = true;
+                return;
+            }
+            ApplyFlex(go, style, horizontal);
         }
 
         private static int GridColumnCount(PaywallBlock block)
@@ -835,32 +1048,68 @@ namespace Revnix.Unity.UI
             }
         }
 
-        /// <summary>Stack placement — `inset` fills the parent, the offsets pin
-        /// an edge. A percentage offset has no fixed pixel value, so it is left
-        /// to the anchor rather than guessed.</summary>
-        private static void PlaceInStack(GameObject go, BlockStyle style)
+        /// <summary>
+        /// Stack placement — `inset` fills the parent, the offsets pin an
+        /// edge, and opposite offsets together (`left` and `right`, `top` and
+        /// `bottom`) stretch between them, which is how a bottom-anchored CTA
+        /// group is written. A percentage offset has no fixed pixel value, so
+        /// it is left to the anchor rather than guessed. Answers whether the
+        /// style placed the box at all.
+        /// </summary>
+        private static bool PlaceInStack(GameObject go, BlockStyle style)
         {
             var rt = (RectTransform)go.transform;
-            if (style == null) return;
+            if (style == null) return false;
             if (style.Inset == true)
             {
                 Fill(rt);
-                return;
+                return true;
             }
             var top = style.Top?.Px;
             var bottom = style.Bottom?.Px;
             var left = style.Left?.Px;
             var right = style.Right?.Px;
-            if (!top.HasValue && !bottom.HasValue && !left.HasValue && !right.HasValue) return;
+            if (!top.HasValue && !bottom.HasValue && !left.HasValue && !right.HasValue) return false;
 
-            var anchorX = left.HasValue ? 0f : (right.HasValue ? 1f : 0.5f);
-            var anchorY = top.HasValue ? 1f : (bottom.HasValue ? 0f : 0.5f);
-            rt.anchorMin = new Vector2(anchorX, anchorY);
-            rt.anchorMax = new Vector2(anchorX, anchorY);
-            rt.pivot = new Vector2(anchorX, anchorY);
-            var x = left.HasValue ? (float)left.Value : (right.HasValue ? -(float)right.Value : 0f);
-            var y = top.HasValue ? -(float)top.Value : (bottom.HasValue ? (float)bottom.Value : 0f);
+            var stretchX = left.HasValue && right.HasValue;
+            var stretchY = top.HasValue && bottom.HasValue;
+            var anchorMinX = stretchX ? 0f : (left.HasValue ? 0f : (right.HasValue ? 1f : 0.5f));
+            var anchorMaxX = stretchX ? 1f : anchorMinX;
+            var anchorMinY = stretchY ? 0f : (top.HasValue ? 1f : (bottom.HasValue ? 0f : 0.5f));
+            var anchorMaxY = stretchY ? 1f : anchorMinY;
+            rt.anchorMin = new Vector2(anchorMinX, anchorMinY);
+            rt.anchorMax = new Vector2(anchorMaxX, anchorMaxY);
+            rt.pivot = new Vector2(stretchX ? 0.5f : anchorMinX, stretchY ? 0.5f : anchorMinY);
+
+            // Pinned to an edge, the box takes no size from a layout group: an
+            // explicit width/height applies here, a stretched axis is the
+            // parent minus its two offsets, and whatever is left is sized to
+            // the content (a pinned label, a badge).
+            var width = style.Width?.Px;
+            var height = style.Height?.Px;
+            var size = rt.sizeDelta;
+            if (stretchX) size.x = -(float)(left.Value + right.Value);
+            else if (width.HasValue) size.x = (float)width.Value;
+            if (stretchY) size.y = -(float)(top.Value + bottom.Value);
+            else if (height.HasValue) size.y = (float)height.Value;
+            rt.sizeDelta = size;
+
+            var fitWidth = !stretchX && !width.HasValue;
+            var fitHeight = !stretchY && !height.HasValue;
+            if (fitWidth || fitHeight)
+            {
+                var fitter = go.GetComponent<ContentSizeFitter>();
+                if (fitter == null) fitter = go.AddComponent<ContentSizeFitter>();
+                if (fitWidth) fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+                if (fitHeight) fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            }
+
+            var x = stretchX ? (float)(left.Value - right.Value) * 0.5f
+                : left.HasValue ? (float)left.Value : (right.HasValue ? -(float)right.Value : 0f);
+            var y = stretchY ? (float)(bottom.Value - top.Value) * 0.5f
+                : top.HasValue ? -(float)top.Value : (bottom.HasValue ? (float)bottom.Value : 0f);
             rt.anchoredPosition = new Vector2(x, y);
+            return true;
         }
 
         private static TextAnchor RowAlignment(BlockStyle style)
@@ -1225,21 +1474,32 @@ namespace Revnix.Unity.UI
     }
 
     /// <summary>
-    /// Scales a `canvas` document to the width it is given.
+    /// Scales a `canvas` document to the viewport it is given (render contract
+    /// v2, section 3).
     ///
     /// The design is authored against a fixed 393×852 screen; the whole tree is
-    /// laid out at that size and then scaled, so absolute placement inside
-    /// `stack` containers stays true on any device. The width is not known
+    /// laid out at the design width and then scaled, so absolute placement
+    /// inside `stack` containers stays true on any device. The scale is
+    /// <c>min(width, 480) / 393</c> — a tablet centres the design rather than
+    /// blowing it up — and the layout height is <c>max(852, height / scale)</c>
+    /// so a taller viewport fills instead of leaving a band. The numbers come
+    /// from <see cref="RevnixPaywallCanvasLayout"/>. The viewport is not known
     /// until layout runs, so the scale is applied every time the rect changes
     /// rather than computed once.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class RevnixCanvasScaler : MonoBehaviour
     {
+        /// <summary>The design body, laid out at 393 wide.</summary>
         public RectTransform Target;
+
+        /// <summary>The scroll content the body sits in — sized to the scaled
+        /// height so the ScrollRect knows how far there is to go.</summary>
+        public RectTransform Content;
 
         private RectTransform _self;
         private float _lastWidth = -1f;
+        private float _lastHeight = -1f;
 
         private void Awake() => _self = (RectTransform)transform;
 
@@ -1250,8 +1510,8 @@ namespace Revnix.Unity.UI
         private void Update()
         {
             // A canvas can be resized without the callback firing (a rotated
-            // device, a resized editor game view), so the width is also checked
-            // each frame — it is one float comparison.
+            // device, a resized editor game view), so the size is also checked
+            // each frame — it is two float comparisons.
             Apply();
         }
 
@@ -1260,10 +1520,146 @@ namespace Revnix.Unity.UI
             if (Target == null) return;
             if (_self == null) _self = (RectTransform)transform;
             var width = _self.rect.width;
-            if (width <= 0f || Mathf.Approximately(width, _lastWidth)) return;
+            var height = _self.rect.height;
+            if (width <= 0f || height <= 0f) return;
+            if (Mathf.Approximately(width, _lastWidth) && Mathf.Approximately(height, _lastHeight)) return;
             _lastWidth = width;
-            var scale = width / PaywallBlockDoc.CanvasWidth;
+            _lastHeight = height;
+
+            var scale = RevnixPaywallCanvasLayout.Scale(width);
+            var designHeight = RevnixPaywallCanvasLayout.DesignHeight(height, scale);
             Target.localScale = new Vector3(scale, scale, 1f);
+            Target.sizeDelta = new Vector2(PaywallBlockDoc.CanvasWidth, designHeight);
+            if (Content != null)
+            {
+                Content.sizeDelta = new Vector2(
+                    Content.sizeDelta.x, RevnixPaywallCanvasLayout.ScaledHeight(designHeight, scale));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Enables vertical scrolling only while the content is taller than the
+    /// viewport (contract v2: no bounce when it fits), keeping a fit pinned to
+    /// the top. RevnixPaywallCenterOnShort's idea, minus the centring — a
+    /// designed screen is authored from its top edge down.
+    /// </summary>
+    internal sealed class RevnixScrollWhenOverflowing : MonoBehaviour
+    {
+        public ScrollRect Scroll;
+
+        private void LateUpdate()
+        {
+            if (Scroll == null || Scroll.content == null || Scroll.viewport == null) return;
+            var overflows = RevnixPaywallCanvasLayout.Overflows(
+                Scroll.viewport.rect.height, Scroll.content.rect.height);
+            if (Scroll.vertical == overflows) return;
+            Scroll.vertical = overflows;
+            if (overflows) return;
+            Scroll.StopMovement();
+            Scroll.content.anchoredPosition = new Vector2(Scroll.content.anchoredPosition.x, 0f);
+        }
+    }
+
+    /// <summary>
+    /// Keeps the fallback close chip below the status bar: its anchored
+    /// position is <c>(-Margin, -(Margin + safeAreaTop))</c> in canvas units,
+    /// re-evaluated as the safe area changes (a rotation). A world-space
+    /// canvas has no screen to be safe from, so it keeps the plain margin.
+    /// </summary>
+    internal sealed class RevnixSafeAreaInset : MonoBehaviour
+    {
+        public float Margin = 14f;
+
+        private Canvas _canvas;
+        private float _applied = -1f;
+
+        private void LateUpdate()
+        {
+            if (_canvas == null) _canvas = GetComponentInParent<Canvas>();
+            var factor = 1f;
+            if (_canvas != null)
+            {
+                var root = _canvas.rootCanvas;
+                if (root == null) root = _canvas;
+                if (root.renderMode == RenderMode.WorldSpace) return;
+                factor = root.scaleFactor;
+            }
+            var safe = Screen.safeArea;
+            var inset = RevnixPaywallCanvasLayout.SafeAreaTopInset(
+                Screen.height, safe.y, safe.height, factor);
+            if (Mathf.Approximately(inset, _applied)) return;
+            _applied = inset;
+            ((RectTransform)transform).anchoredPosition = new Vector2(-Margin, -(Margin + inset));
+        }
+    }
+
+    /// <summary>
+    /// The pressed state of a designed button (contract v2, section 4): the
+    /// whole button at 80% opacity while the pointer is down, restored on
+    /// release or when the pointer leaves. Multiplies whatever alpha the
+    /// block's own `opacity` set, and stays put while the button is not
+    /// interactable (loading).
+    /// </summary>
+    internal sealed class RevnixPaywallPressOpacity : MonoBehaviour,
+        IPointerDownHandler, IPointerUpHandler, IPointerExitHandler
+    {
+        public const float PressedAlpha = 0.8f;
+
+        private CanvasGroup _group;
+        private Selectable _selectable;
+        private float _rest = 1f;
+        private bool _down;
+
+        private void Awake()
+        {
+            _group = GetComponent<CanvasGroup>();
+            if (_group == null) _group = gameObject.AddComponent<CanvasGroup>();
+            _selectable = GetComponent<Selectable>();
+        }
+
+        public void OnPointerDown(PointerEventData eventData)
+        {
+            if (_down || _group == null) return;
+            if (_selectable == null) _selectable = GetComponent<Selectable>();
+            if (_selectable != null && !_selectable.IsInteractable()) return;
+            _down = true;
+            _rest = _group.alpha;
+            _group.alpha = _rest * PressedAlpha;
+        }
+
+        public void OnPointerUp(PointerEventData eventData) => Release();
+
+        public void OnPointerExit(PointerEventData eventData) => Release();
+
+        private void OnDisable() => Release();
+
+        private void Release()
+        {
+            if (!_down) return;
+            _down = false;
+            if (_group != null) _group.alpha = _rest;
+        }
+    }
+
+    /// <summary>
+    /// An image slot that names only an aspect ratio: its height follows the
+    /// width the layout gives it. Written to the LayoutElement rather than the
+    /// rect, the way RevnixPaywallPillSize does, because a layout group drives
+    /// the rect itself and an AspectRatioFitter would fight it.
+    /// </summary>
+    internal sealed class RevnixPaywallAspectHeight : MonoBehaviour
+    {
+        public LayoutElement Element;
+        public float Ratio = 1f;
+
+        private void LateUpdate()
+        {
+            if (Element == null || Ratio <= 0f) return;
+            var width = ((RectTransform)transform).rect.width;
+            if (width <= 0f) return;
+            var height = width / Ratio;
+            if (!Mathf.Approximately(Element.preferredHeight, height)) Element.preferredHeight = height;
         }
     }
 }

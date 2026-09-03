@@ -392,6 +392,23 @@ namespace Revnix
         public string Id = "";
         public BlockStyle Style;
 
+        /// <summary>
+        /// Merged over <see cref="Style"/>, field by field, while the block is
+        /// in SELECTED context (render contract v2, REV-262). Valid on every
+        /// block kind: a plan card's ring, dot and caption change with the
+        /// card, not just the card itself. Ignored outside any package card.
+        /// See <see cref="RevnixPaywallSelection"/>.
+        /// </summary>
+        public BlockStyle SelectedStyle;
+
+        /// <summary>
+        /// "selected" draws the block only in selected context, "unselected"
+        /// only outside it; null draws it always. Ignored outside any package
+        /// card — a root-level block is never hidden. An unknown value parses
+        /// to null, so a document from a newer dashboard keeps its elements.
+        /// </summary>
+        public string Visibility;
+
         /// <summary>What tapping this block does — text, image and button
         /// blocks only; every other kind ignores it. See
         /// <see cref="BlockAction"/>.</summary>
@@ -436,9 +453,6 @@ namespace Revnix
         /// <summary>Renders this container once per package ("packages").</summary>
         public string Repeat;
 
-        /// <summary>Merged over Style on the package the customer selected.</summary>
-        public BlockStyle SelectedStyle;
-
         /// <summary>"This card describes package N of the offering". A card
         /// whose index the offering does not reach is hidden.</summary>
         public int? PackageIndex;
@@ -450,6 +464,21 @@ namespace Revnix
         public string GridColumns;
 
         public List<PaywallBlock> Children;
+
+        /// <summary>
+        /// This block drawn with another style — how the renderer hands a
+        /// block its effective (selected-context) style without mutating the
+        /// document, which is redrawn on every selection change. A shallow
+        /// copy: the children list is shared, which is fine because nothing
+        /// writes to it.
+        /// </summary>
+        public PaywallBlock WithStyle(BlockStyle style)
+        {
+            if (ReferenceEquals(style, Style)) return this;
+            var copy = (PaywallBlock)MemberwiseClone();
+            copy.Style = style;
+            return copy;
+        }
     }
 
     /// <summary>
@@ -526,10 +555,19 @@ namespace Revnix
         private static PaywallBlock ParseBlock(object value)
         {
             if (!(value is Dictionary<string, object> map)) return new PaywallBlock();
+            // Selection fields are read for EVERY kind (render contract v2):
+            // a caption or a ring inside a plan card carries them as readily
+            // as the card does.
+            var visibility = RevnixJson.GetString(map, "visibility");
             var block = new PaywallBlock
             {
                 Id = RevnixJson.GetString(map, "id", ""),
                 Style = BlockStyle.FromJson(RevnixJson.GetObject(map, "style")),
+                SelectedStyle = BlockStyle.FromJson(RevnixJson.GetObject(map, "selectedStyle")),
+                Visibility = visibility == RevnixPaywallSelection.VisibilitySelected
+                    || visibility == RevnixPaywallSelection.VisibilityUnselected
+                    ? visibility
+                    : null,
                 // An action this SDK does not know stays None, leaving the
                 // element inert rather than discarding the block.
                 Action = RevnixJson.GetString(map, "action") == "close"
@@ -597,7 +635,6 @@ namespace Revnix
                     block.Kind = PaywallBlockKind.Card;
                     block.Layout = RevnixJson.GetString(map, "layout");
                     block.Repeat = RevnixJson.GetString(map, "repeat");
-                    block.SelectedStyle = BlockStyle.FromJson(RevnixJson.GetObject(map, "selectedStyle"));
                     var index = RevnixJson.GetNullableLong(map, "packageIndex");
                     block.PackageIndex = index.HasValue ? (int)index.Value : (int?)null;
                     var columns = RevnixJson.GetNullableLong(map, "columns");
@@ -649,6 +686,11 @@ namespace Revnix
         /// being re-authored, and a design that DOES author a close chip never
         /// shows two. The same predicate exists in every Revnix SDK — keep
         /// them identical.
+        ///
+        /// A block with <see cref="PaywallBlock.Visibility"/> set is skipped
+        /// for the same reason a conditional container is: it draws only in
+        /// one selection state, so a close authored on it MIGHT not appear,
+        /// and counting it would suppress the fallback chip.
         /// </summary>
         public static bool HasCloseAction(List<PaywallBlock> blocks)
         {
@@ -656,6 +698,7 @@ namespace Revnix
             foreach (var block in blocks)
             {
                 if (block == null) continue;
+                if (block.Visibility != null) continue;
                 switch (block.Kind)
                 {
                     case PaywallBlockKind.Text:

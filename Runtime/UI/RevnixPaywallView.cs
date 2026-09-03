@@ -73,10 +73,18 @@ namespace Revnix.Unity.UI
             }
         }
 
-        /// <summary>Renders a spinner in the CTA and disables purchasing.</summary>
+        /// <summary>Renders a spinner in the CTA and disables purchasing. A
+        /// designed paywall redraws, since its loading state is structural
+        /// (the button's label gives way to a spinner) — the same split as
+        /// selection.</summary>
         public void SetLoading(bool loading)
         {
             _loading = loading;
+            if (_blockPaywall)
+            {
+                RebuildBlocks();
+                return;
+            }
             if (_ctaLabel != null) _ctaLabel.SetActive(!loading);
             if (_ctaSpinner != null) _ctaSpinner.SetActive(loading);
             RefreshSelection();
@@ -163,13 +171,7 @@ namespace Revnix.Unity.UI
             // published before the block builder — so anything already live
             // draws unchanged.
             _blockPaywall = BuildBlocks();
-            if (!_blockPaywall)
-            {
-                var column = BuildScaffold();
-                BuildBody(column);
-                RefreshSelection();
-                BuildClassicClose();
-            }
+            if (!_blockPaywall) BuildClassic();
 
             // One view per Create: re-creating (a re-shown paywall) is a
             // genuine new display; property updates are not (REV-094).
@@ -185,6 +187,18 @@ namespace Revnix.Unity.UI
         /// request returns, and a player who dismisses in that window would
         /// otherwise report a close with no id and lose the pairing.</summary>
         private Task<string> _viewReport;
+
+        /// <summary>The classic `template` layout — the fallback for every
+        /// paywall that is not a designed one, and for a designed one whose
+        /// tree failed to build.</summary>
+        private void BuildClassic()
+        {
+            _selectables.Clear();
+            var column = BuildScaffold();
+            BuildBody(column);
+            RefreshSelection();
+            BuildClassicClose();
+        }
 
         /// <summary>
         /// Runs the host's dismissal, reporting <c>paywall.closed</c> alongside
@@ -248,10 +262,11 @@ namespace Revnix.Unity.UI
                 });
             }
 
-            // The same resolver the classic path uses, so a tapped selection
-            // survives the redraw: controlled → internal → highlight → first.
-            var selected = RevnixPaywallLogic.ResolveSelection(
-                _config, _options.Packages, _controlledSelected, _internalSelected);
+            // The render contract's selection rule, so a tapped selection
+            // survives the redraw: host → internal → highlight → first, each
+            // counting only while it names an offered package.
+            var selected = RevnixPaywallSelection.ResolveSelectedPackageId(
+                packages, _controlledSelected, _internalSelected, _config.HighlightPackageId);
 
             try
             {
@@ -260,6 +275,7 @@ namespace Revnix.Unity.UI
                     Doc = doc,
                     Packages = packages,
                     SelectedPackageId = selected,
+                    Loading = _loading,
                     HeroImageUrl = _config.HeroImageUrl,
                     FooterTermsUrl = _config.Footer != null ? _config.Footer.TermsUrl : null,
                     FooterPrivacyUrl = _config.Footer != null ? _config.Footer.PrivacyUrl : null,
@@ -281,7 +297,14 @@ namespace Revnix.Unity.UI
             {
                 // Clear whatever was half-built before falling back, so the
                 // classic layout does not draw on top of a partial design.
-                for (var i = transform.childCount - 1; i >= 0; i--) Destroy(transform.GetChild(i).gameObject);
+                // Detached first: Destroy only takes effect at the end of the
+                // frame.
+                for (var i = transform.childCount - 1; i >= 0; i--)
+                {
+                    var child = transform.GetChild(i).gameObject;
+                    child.transform.SetParent(null, false);
+                    Destroy(child);
+                }
                 return false;
             }
         }
@@ -1116,10 +1139,14 @@ namespace Revnix.Unity.UI
         }
 
         /// <summary>
-        /// Redraws a designed paywall after a selection change. Its selected
-        /// treatment is structural — a badge and a sub-line appear, and an
-        /// arbitrary `selectedStyle` merges in — so it is rebuilt rather than
-        /// restyled in place, the way the classic layouts are.
+        /// Redraws a designed paywall after a selection or loading change. Its
+        /// selected treatment is structural — a badge and a sub-line appear,
+        /// and an arbitrary `selectedStyle` merges in — so it is rebuilt rather
+        /// than restyled in place, the way the classic layouts are.
+        ///
+        /// Should the rebuild fail where the first build did not, the view
+        /// falls back to the classic layout exactly as Initialize does, rather
+        /// than leaving the customer an empty screen.
         /// </summary>
         private void RebuildBlocks()
         {
@@ -1133,6 +1160,7 @@ namespace Revnix.Unity.UI
                 Destroy(child);
             }
             _blockPaywall = BuildBlocks();
+            if (!_blockPaywall) BuildClassic();
         }
 
         /// <summary>2px accent border on the selected package, 1px theme
@@ -1218,6 +1246,9 @@ namespace Revnix.Unity.UI
             rt.pivot = new Vector2(1f, 1f);
             rt.sizeDelta = new Vector2(30f, 30f);
             rt.anchoredPosition = new Vector2(-14f, -14f);
+            // Below the status bar, like the designed path's chip.
+            var inset = go.AddComponent<RevnixSafeAreaInset>();
+            inset.Margin = 14f;
 
             var image = go.AddComponent<Image>();
             var sprite = RevnixPaywallSprites.Rounded(15);

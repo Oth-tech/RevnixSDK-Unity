@@ -179,6 +179,16 @@ namespace Revnix.Unity.UI
             {
                 _viewReport = options.Client.LogPaywallDisplay(
                     options.PlacementKey, options.PaywallId);
+                // REV-263: an offering with nothing to sell is the one failure
+                // the view can see by itself, and the one most worth knowing
+                // about — the paywall drew, the player could not buy.
+                if (options.Packages == null || options.Packages.Count == 0)
+                {
+                    ReportInteraction(
+                        RevnixPaywallEvent.Error,
+                        code: "no_products",
+                        message: "paywall displayed with no packages");
+                }
             }
         }
 
@@ -198,6 +208,100 @@ namespace Revnix.Unity.UI
             BuildBody(column);
             RefreshSelection();
             BuildClassicClose();
+        }
+
+        // ——— REV-263: the interaction vocabulary ———
+        //
+        // The view reports what it genuinely OBSERVES: the selection change,
+        // the CTA press, the restore press, and an offering that arrived with
+        // nothing to sell. It never reports the purchase OUTCOME — the IAP
+        // call happens in the game, so only the game knows whether the player
+        // cancelled or the payment was refused. Report those with
+        // Client.LogPaywallEvent(...) from your own Unity IAP callbacks.
+
+        /// <summary>Rises per CTA press, so a retry after a failure is its own
+        /// occurrence rather than a duplicate of the first try.</summary>
+        private int _purchaseAttempts;
+
+        private void ReportInteraction(
+            RevnixPaywallEvent evt,
+            string productId = null,
+            string code = null,
+            string message = null,
+            string eventId = null)
+        {
+            if (_options.Client == null || _options.DisableViewTracking) return;
+            var report = _viewReport;
+            if (report == null) return;
+            _ = ReportInteractionAsync(report, _options, evt, productId, code, message, eventId);
+        }
+
+        private static async Task ReportInteractionAsync(
+            Task<string> viewReport,
+            RevnixPaywallOptions options,
+            RevnixPaywallEvent evt,
+            string productId,
+            string code,
+            string message,
+            string eventId)
+        {
+            // Awaiting the view beacon for the same reason the close does: an
+            // interaction reported before the display id exists could not be
+            // tied to the display it happened on.
+            string viewId;
+            try
+            {
+                viewId = await viewReport;
+            }
+            catch (Exception)
+            {
+                return;
+            }
+            if (viewId == null) return;
+            await options.Client.LogPaywallEvent(
+                evt,
+                viewId,
+                options.PlacementKey,
+                options.PaywallId,
+                productId,
+                code,
+                message,
+                eventId == null ? null : viewId + ":" + eventId);
+        }
+
+        /// <summary>The catalog product behind a package, so a report names the
+        /// plan the way the rest of the ledger does. Null when the offering did
+        /// not carry one — reporting the package id instead would look like a
+        /// product that does not exist.</summary>
+        private string ProductIdFor(string packageId)
+        {
+            var packages = _options.Packages;
+            if (packages == null) return null;
+            foreach (var pkg in packages)
+            {
+                if (pkg != null && pkg.PackageId == packageId) return pkg.ProductId;
+            }
+            return null;
+        }
+
+        /// <summary>Every CTA path routes through here, so the start report can
+        /// never be wired on one draw path and forgotten on the other.</summary>
+        private void PurchaseAndReport(string packageId)
+        {
+            _purchaseAttempts += 1;
+            ReportInteraction(
+                RevnixPaywallEvent.PurchaseStarted,
+                ProductIdFor(packageId),
+                eventId: "buy:" + _purchaseAttempts);
+            _options.OnPurchase?.Invoke(packageId);
+        }
+
+        /// <summary>Restore — the report rides along with the host's
+        /// handler.</summary>
+        private void RestoreAndReport()
+        {
+            ReportInteraction(RevnixPaywallEvent.Restore);
+            _options.OnRestore?.Invoke();
         }
 
         /// <summary>
@@ -281,10 +385,12 @@ namespace Revnix.Unity.UI
                     FooterPrivacyUrl = _config.Footer != null ? _config.Footer.PrivacyUrl : null,
                     OnPurchase = id =>
                     {
-                        if (!_loading && _options.OnPurchase != null) _options.OnPurchase(id);
+                        if (!_loading) PurchaseAndReport(id);
                     },
                     OnSelect = Select,
-                    OnRestore = _options.OnRestore,
+                    OnRestore = _options.OnRestore == null
+                        ? null
+                        : (Action)RestoreAndReport,
                     OnTerms = _options.OnTerms,
                     OnPrivacy = _options.OnPrivacy,
                     OnClose = _options.OnClose == null ? null : (Action)CloseAndReport,
@@ -1077,7 +1183,7 @@ namespace Revnix.Unity.UI
             if (_loading) return;
             var selected = SelectedPackageId;
             if (selected == null) return;
-            _options.OnPurchase?.Invoke(selected);
+            PurchaseAndReport(selected);
         }
 
         /// <summary>Footer Restore · Terms · Privacy. Handlers win over config
@@ -1109,7 +1215,8 @@ namespace Revnix.Unity.UI
                 var button = link.AddComponent<Button>();
                 button.transition = Selectable.Transition.None;
                 button.targetGraphic = text;
-                var handler = item.Label == "Restore" ? _options.OnRestore
+                var handler = item.Label == "Restore"
+                    ? (_options.OnRestore == null ? null : (Action)RestoreAndReport)
                     : item.Label == "Terms" ? _options.OnTerms
                     : _options.OnPrivacy;
                 var url = item.Url;
@@ -1134,6 +1241,13 @@ namespace Revnix.Unity.UI
         private void Select(string packageId)
         {
             _internalSelected = packageId;
+            // REV-263: one report per (display, package) — a player toggling
+            // monthly → yearly → monthly weighed two plans, not three, and the
+            // server's default key (the viewId alone) would keep only the first.
+            ReportInteraction(
+                RevnixPaywallEvent.Selected,
+                ProductIdFor(packageId),
+                eventId: "sel:" + packageId);
             _options.OnSelectPackage?.Invoke(packageId);
             if (_blockPaywall) RebuildBlocks(); else RefreshSelection();
         }

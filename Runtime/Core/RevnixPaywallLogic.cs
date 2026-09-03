@@ -67,6 +67,12 @@ namespace Revnix
         public long? AmountMinor;
 
         public string Currency;
+
+        /// <summary>REV-263: the catalog product behind this package. Only
+        /// telemetry reads it — a Selected or PurchaseStarted report names the
+        /// plan the way the rest of the ledger does. Optional: without it the
+        /// interaction is still reported, just with no plan attached.</summary>
+        public string ProductId;
     }
 
     /// <summary>The screen structures ResolveLayout maps a config's template

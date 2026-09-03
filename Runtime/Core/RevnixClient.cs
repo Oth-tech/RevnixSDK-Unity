@@ -441,6 +441,70 @@ namespace Revnix
             }
         }
 
+        /// <summary>
+        /// Report one of the six paywall interactions (REV-263) — what the
+        /// customer DID on a display, between the
+        /// <see cref="LogPaywallDisplay"/> that opened it and the
+        /// <see cref="LogPaywallClosed"/> (or purchase) that ended it.
+        ///
+        /// Fire-and-forget like the other beacons: never throws.
+        ///
+        /// <paramref name="viewId"/> is the id
+        /// <see cref="LogPaywallDisplay"/> returned for THIS display. Passing
+        /// it is what threads the whole life of one impression together and
+        /// puts the event on the paywall's own analytics row.
+        ///
+        /// RevnixPaywallView reports Selected, PurchaseStarted, Restore and a
+        /// no-products Error for you. The purchase OUTCOME is yours: only your
+        /// game performs the IAP call, so report PurchaseAbandoned /
+        /// PurchaseFailed from your own Unity IAP failure callbacks
+        /// (<c>PurchaseFailureReason.UserCancelled</c> is an abandonment,
+        /// anything else is a failure).
+        ///
+        /// <paramref name="eventId"/> is the idempotency key and defaults to
+        /// the view id, which caps the report at one per display per event.
+        /// Pass one per occurrence — and reuse it across your own retries — to
+        /// record each occurrence.
+        /// </summary>
+        public async Task LogPaywallEvent(
+            RevnixPaywallEvent evt,
+            string viewId,
+            string placementKey = null,
+            string paywallId = null,
+            string productId = null,
+            string code = null,
+            string message = null,
+            string eventId = null)
+        {
+            var body = new Dictionary<string, object>
+            {
+                ["customerId"] = CustomerId(),
+                ["viewId"] = viewId ?? "",
+                ["event"] = RevnixPaywallEventNames.Wire(evt),
+                ["sdkVersion"] = SdkVersion,
+            };
+            if (eventId != null) body["eventId"] = eventId;
+            if (placementKey != null) body["placementKey"] = placementKey;
+            if (paywallId != null) body["paywallId"] = paywallId;
+            if (productId != null) body["productId"] = productId;
+            if (code != null) body["code"] = code;
+            // The server bounds `message` at 1024; trimming here keeps a long
+            // localized store error from turning the whole report into a 400.
+            if (message != null)
+            {
+                body["message"] = message.Length > 1024 ? message.Substring(0, 1024) : message;
+            }
+            try
+            {
+                await Request("POST", new[] { "v1", "paywalls", "events" }, body);
+            }
+            catch (RevnixException err)
+            {
+                _bgFailures += 1;
+                Diagnostic("logPaywallEvent", err.Message);
+            }
+        }
+
         // ── Transport ────────────────────────────────────────────────────────
 
         /// <summary>Set attributes on the current customer (REV-033 v2).

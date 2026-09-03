@@ -19,6 +19,55 @@ namespace Revnix
             => value == "google" ? RevnixStore.Google : RevnixStore.Apple;
     }
 
+    /// <summary>
+    /// REV-263: the six paywall interactions
+    /// <see cref="RevnixClient.LogPaywallEvent"/> can report — what the
+    /// customer did on a display, between the view that opened it and the
+    /// close or purchase that ended it. The server turns each into the ledger
+    /// type <c>paywall.&lt;wire name&gt;</c>.
+    /// </summary>
+    public enum RevnixPaywallEvent
+    {
+        /// <summary>A package was picked.</summary>
+        Selected,
+
+        /// <summary>Checkout was started.</summary>
+        PurchaseStarted,
+
+        /// <summary>The customer backed out at the store sheet
+        /// (<c>PurchaseFailureReason.UserCancelled</c>).</summary>
+        PurchaseAbandoned,
+
+        /// <summary>The store refused the payment.</summary>
+        PurchaseFailed,
+
+        /// <summary>Restore purchases was tapped.</summary>
+        Restore,
+
+        /// <summary>The paywall itself failed — config, products, or
+        /// render.</summary>
+        Error,
+    }
+
+    public static class RevnixPaywallEventNames
+    {
+        /// <summary>The wire name the API validates against. Spelled out
+        /// rather than derived from the enum name so the snake_case contract
+        /// is visible here and cannot drift with a rename.</summary>
+        public static string Wire(RevnixPaywallEvent evt)
+        {
+            switch (evt)
+            {
+                case RevnixPaywallEvent.Selected: return "selected";
+                case RevnixPaywallEvent.PurchaseStarted: return "purchase_started";
+                case RevnixPaywallEvent.PurchaseAbandoned: return "purchase_abandoned";
+                case RevnixPaywallEvent.PurchaseFailed: return "purchase_failed";
+                case RevnixPaywallEvent.Restore: return "restore";
+                default: return "error";
+            }
+        }
+    }
+
     // ——— GET /v1/customers/{id}/entitlements ———
 
     public sealed class EntitlementSource

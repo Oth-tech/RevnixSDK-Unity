@@ -1108,6 +1108,32 @@ namespace Revnix.Unity.UI
                 : left.HasValue ? (float)left.Value : (right.HasValue ? -(float)right.Value : 0f);
             var y = stretchY ? (float)(bottom.Value - top.Value) * 0.5f
                 : top.HasValue ? -(float)top.Value : (bottom.HasValue ? (float)bottom.Value : 0f);
+
+            // CSS `translate`. A PERCENTAGE translate is a fraction of the
+            // block's own size, and UGUI's pivot is exactly that — the point of
+            // the element that lands on the anchor — so the two compose without
+            // measuring anything. Raising pivot.x slides the element left, so a
+            // CSS +x% (rightwards) subtracts from it; raising pivot.y slides it
+            // down, and CSS +y% is also downwards, so that one adds. This is
+            // what makes `left: 50%` + `translate: "-50% 0"` centre a pinned
+            // badge here the way it does in the dashboard.
+            var translate = RevnixBlockGeometry.ParseTranslate(style.Translate);
+            if (translate.HasValue)
+            {
+                var t = translate.Value;
+                if (t.X.Fraction != 0.0 || t.Y.Fraction != 0.0)
+                {
+                    rt.pivot = new Vector2(
+                        rt.pivot.x - (float)t.X.Fraction,
+                        rt.pivot.y + (float)t.Y.Fraction);
+                }
+
+                // The px half is a plain offset. UGUI's y axis points up and
+                // CSS's points down, hence the sign flip on y alone.
+                x += (float)t.X.Px;
+                y -= (float)t.Y.Px;
+            }
+
             rt.anchoredPosition = new Vector2(x, y);
             return true;
         }
@@ -1236,6 +1262,35 @@ namespace Revnix.Unity.UI
             {
                 go.transform.localRotation = Quaternion.Euler(0f, 0f, -(float)style.Rotate.Value);
             }
+
+            ReportUndrawnGeometry(style);
+        }
+
+        /// <summary>
+        /// Reports the geometry fields UGUI cannot draw.
+        ///
+        /// All three are now DECODED, which is the point: before this they were
+        /// dropped by the parser and nobody — not the host app, not us — could
+        /// tell that a design had asked for something the renderer skipped. A
+        /// clip needs a mask mesh (UGUI allows one graphic per element, the
+        /// same limit that stops a `text` block painting a fill); a filter
+        /// needs a per-element effect stack; a tiled fill needs a repeating
+        /// material. Each is a real piece of work, and until it is done the
+        /// honest behaviour is to say so rather than to ship a rectangle where
+        /// the design asked for a star.
+        /// </summary>
+        private void ReportUndrawnGeometry(BlockStyle style)
+        {
+            if (_ctx.OnDiagnostic == null) return;
+            if (!string.IsNullOrEmpty(style.ClipPath))
+                Diagnostic("clipPath not drawn: " + style.ClipPath);
+            if (!string.IsNullOrEmpty(style.Filter))
+                Diagnostic("filter not drawn: " + style.Filter);
+            // Only a repeating gradient is visibly wrong untiled; a tile size
+            // on a flat colour changes nothing, so it is not worth reporting.
+            if (!string.IsNullOrEmpty(style.FillSize) && style.Fill != null &&
+                style.Fill.Contains("gradient"))
+                Diagnostic("fillSize not tiled: " + style.FillSize);
         }
 
         /// <summary>

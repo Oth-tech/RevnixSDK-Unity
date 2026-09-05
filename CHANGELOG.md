@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+- **Three style fields the designs use now reach the renderer.** `translate`,
+  `clipPath` and `fillSize` were named by no field on the block style, so the
+  decoder dropped them before the renderer ever saw them. `translate` is now
+  drawn — folded into the UGUI pivot, so a badge pinned with `left: 50%` plus
+  `translate: "-50% 0"` centres instead of sitting half its own width to the
+  right. `clipPath` and `fillSize` are decoded and reported through
+  `onDiagnostic` rather than silently ignored: UGUI allows one graphic per
+  element, so an arbitrary polygon clip needs a mask mesh and a tiled gradient
+  needs a repeating material. `filter` is reported the same way. `textWrap` is
+  decoded but not reported: it moves a line break, not the design.
+- **`LogPaywallEvent` — the six paywall interactions** (`Selected`,
+  `PurchaseStarted`, `PurchaseAbandoned`, `PurchaseFailed`, `Restore`,
+  `Error`), i.e. what the customer did BETWEEN the display and the close.
+  `RevnixPaywallView` sends all but the purchase outcome, which only your game
+  can see. All six are pure history: over-reporting skews a report, it never
+  grants or revokes access.
+- **`LogPaywallDisplay` and `LogPaywallClosed`** complete the impression.
+  `LogPaywallDisplay` is the same beacon as `LogPaywallShown` but hands back
+  the view id it minted; pass that id to `LogPaywallClosed` and
+  `LogPaywallEvent` so the halves of one display pair up. `LogPaywallClosed` is
+  idempotent per view id, so a retry or a double-dismiss cannot count two.
+- **The selected plan is drawn from the design.** Every block carries
+  `SelectedStyle` and `Visibility`, so a plan card can change its fill, border
+  and text when its package is the selected one, and a block can be drawn only
+  while selected (a filled radio dot) or only while not.
+- **Element gradients paint on every block**, keeping their transparency, and
+  a `text` element paints no fill of its own (UGUI's one-graphic limit — give a
+  text badge a card behind it).
+
 ## 0.2.0
 
 A/B experiments (REV-219).

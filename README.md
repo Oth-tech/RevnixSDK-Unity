@@ -106,6 +106,39 @@ control back to the view). Footer links honor the dashboard's footer config;
 an explicit `OnTerms`/`OnPrivacy` handler wins over a config URL, which
 otherwise opens via `Application.OpenURL`.
 
+### Reporting the whole life of a display
+
+Passing `Client` reports the impression, and `RevnixPaywallView` pairs the
+close for you. Drawing your own paywall, the three calls are yours:
+
+| Call | What it does |
+|---|---|
+| `LogPaywallDisplay(…) → Task<string>` | The impression beacon, returning the `viewId` it minted. Prefer it over `LogPaywallShown` whenever you intend to report the close or an interaction — that id is what pairs the halves of one display. |
+| `LogPaywallClosed(viewId, …)` | Ends that display. Idempotent per view id, so a retry or a double-dismiss cannot count two. Without it a funnel knows how many saw the paywall, not how many left without buying. |
+| `LogPaywallEvent(evt, viewId, …)` | One of six interactions — `Selected`, `PurchaseStarted`, `PurchaseAbandoned`, `PurchaseFailed`, `Restore`, `Error` — i.e. what happened BETWEEN the display and the close. |
+
+The purchase **outcome** is always yours, even with the built-in renderer:
+your app makes the Unity IAP call, so only your app sees whether the sheet was
+cancelled or the store refused the payment.
+
+```csharp
+var viewId = await revnix.LogPaywallDisplay("main_paywall", placement.Paywall.PaywallId);
+
+// From IStoreListener.OnPurchaseFailed.
+public void OnPurchaseFailed(Product product, PurchaseFailureReason reason)
+{
+    var evt = reason == PurchaseFailureReason.UserCancelled
+        ? RevnixPaywallEvent.PurchaseAbandoned
+        : RevnixPaywallEvent.PurchaseFailed;
+    _ = revnix.LogPaywallEvent(evt, viewId, productId: product.definition.id);
+}
+
+await revnix.LogPaywallClosed(viewId, "main_paywall", placement.Paywall.PaywallId);
+```
+
+All of these are fire-and-forget and pure ledger history: over-reporting can
+skew a report, it can never grant or revoke access.
+
 ## Targeting an A/B audience
 
 An experiment can be narrowed to an audience: conditions over customer

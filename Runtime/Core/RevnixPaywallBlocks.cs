@@ -108,6 +108,14 @@ namespace Revnix
     public sealed class BlockStyle
     {
         public string Fill;
+
+        /// <summary>
+        /// Sizing for a <c>Fill</c> that is an image or a REPEATING gradient —
+        /// the CSS <c>background-size</c> value ("cover", "24px 24px"). The
+        /// grid and hatch washes several designs use are a tiled gradient.
+        /// </summary>
+        public string FillSize;
+
         public string TextColor;
 
         /// <summary>0–100, like the dashboard's opacity inputs.</summary>
@@ -154,6 +162,14 @@ namespace Revnix
 
         public string TextTransform;
         public string Decoration;
+
+        /// <summary>
+        /// Line-breaking preference for headlines ("balance", "pretty").
+        /// Carried so the field survives a round trip; UGUI has no balanced-
+        /// wrap strategy, so it does not change layout here.
+        /// </summary>
+        public string TextWrap;
+
         public bool? Nowrap;
 
         /// <summary>Gap between a container's children.</summary>
@@ -182,7 +198,28 @@ namespace Revnix
         public string SelfAlign;
         public string Shadow;
         public double? Blur;
+
+        /// <summary>
+        /// Raw CSS filter — the designs use it for soft glows. Carried and
+        /// reported; UGUI has no per-element filter stack.
+        /// </summary>
+        public string Filter;
+
+        /// <summary>
+        /// Raw CSS clip-path — starbursts and ticket notches. Carried and
+        /// reported; clipping an arbitrary polygon needs a mask mesh, which
+        /// UGUI cannot do without a second graphic per block.
+        /// </summary>
+        public string ClipPath;
+
         public double? Rotate;
+
+        /// <summary>
+        /// CSS <c>translate</c> ("-50% 0") — the designs centre pinned badges
+        /// with left:50% + translateX(-50%). Resolved against the block's OWN
+        /// size, so a percentage means what CSS means by it.
+        /// </summary>
+        public string Translate;
 
         /// <summary>Placement inside a `stack` container. `inset` fills the
         /// stack; the individual offsets pin an edge. Ignored elsewhere.</summary>
@@ -205,6 +242,7 @@ namespace Revnix
             return new BlockStyle
             {
                 Fill = other.Fill ?? Fill,
+                FillSize = other.FillSize ?? FillSize,
                 TextColor = other.TextColor ?? TextColor,
                 Opacity = other.Opacity ?? Opacity,
                 BorderColor = other.BorderColor ?? BorderColor,
@@ -235,6 +273,7 @@ namespace Revnix
                 LineHeight = other.LineHeight ?? LineHeight,
                 TextTransform = other.TextTransform ?? TextTransform,
                 Decoration = other.Decoration ?? Decoration,
+                TextWrap = other.TextWrap ?? TextWrap,
                 Nowrap = other.Nowrap ?? Nowrap,
                 Gap = other.Gap ?? Gap,
                 Height = other.Height ?? Height,
@@ -251,7 +290,10 @@ namespace Revnix
                 SelfAlign = other.SelfAlign ?? SelfAlign,
                 Shadow = other.Shadow ?? Shadow,
                 Blur = other.Blur ?? Blur,
+                Filter = other.Filter ?? Filter,
+                ClipPath = other.ClipPath ?? ClipPath,
                 Rotate = other.Rotate ?? Rotate,
+                Translate = other.Translate ?? Translate,
                 Inset = other.Inset ?? Inset,
                 Top = other.Top ?? Top,
                 Right = other.Right ?? Right,
@@ -275,6 +317,7 @@ namespace Revnix
             return new BlockStyle
             {
                 Fill = RevnixJson.GetString(map, "fill"),
+                FillSize = RevnixJson.GetString(map, "fillSize"),
                 TextColor = RevnixJson.GetString(map, "textColor"),
                 Opacity = RevnixJson.GetNullableDouble(map, "opacity"),
                 BorderColor = RevnixJson.GetString(map, "borderColor"),
@@ -305,6 +348,7 @@ namespace Revnix
                 LineHeight = RevnixJson.GetNullableDouble(map, "lineHeight"),
                 TextTransform = RevnixJson.GetString(map, "textTransform"),
                 Decoration = RevnixJson.GetString(map, "decoration"),
+                TextWrap = RevnixJson.GetString(map, "textWrap"),
                 Nowrap = RevnixJson.GetNullableBool(map, "nowrap"),
                 Gap = RevnixJson.GetNullableDouble(map, "gap"),
                 Height = BlockDimension.From(map, "height"),
@@ -321,7 +365,10 @@ namespace Revnix
                 SelfAlign = RevnixJson.GetString(map, "selfAlign"),
                 Shadow = RevnixJson.GetString(map, "shadow"),
                 Blur = RevnixJson.GetNullableDouble(map, "blur"),
+                Filter = RevnixJson.GetString(map, "filter"),
+                ClipPath = RevnixJson.GetString(map, "clipPath"),
                 Rotate = RevnixJson.GetNullableDouble(map, "rotate"),
+                Translate = RevnixJson.GetString(map, "translate"),
                 Inset = RevnixJson.GetNullableBool(map, "inset"),
                 Top = BlockDimension.From(map, "top"),
                 Right = BlockDimension.From(map, "right"),

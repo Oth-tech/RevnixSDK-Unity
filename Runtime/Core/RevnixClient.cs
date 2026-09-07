@@ -21,7 +21,7 @@ namespace Revnix
     /// </summary>
     public sealed class RevnixClient
     {
-        public const string SdkVersion = "0.2.0";
+        public const string SdkVersion = "0.3.0";
 
         private const long ExpiryGraceMs = 3L * 24 * 3600 * 1000;
         private const long RollbackToleranceMs = 5L * 60 * 1000;
@@ -31,12 +31,19 @@ namespace Revnix
         private const string KeyWallClock = "revnix.lastWallClock";
         private const string KeyQueue = "revnix.pendingPurchases";
         private const string KeyCacheIndex = "revnix.entIndex";
+        private const string KeyInstalledAt = "revnix.installedAt";
 
         private readonly RevnixConfig _config;
         private readonly object _lock = new object();
         private readonly Random _random = new Random();
         private Task<CustomerEntitlements> _inflight;
         private int _bgFailures;
+        // REV-268: the encoded X-Revnix-Device value, built on the first
+        // resolve and kept for the client's lifetime (so firstOpen holds for
+        // the whole first session). _deviceHeaderBuilt distinguishes "built,
+        // nothing to send" from "not built yet".
+        private string _deviceHeader;
+        private bool _deviceHeaderBuilt;
 
         public RevnixClient(RevnixConfig config)
         {
@@ -327,9 +334,16 @@ namespace Revnix
             // REV-219: the customer id lets the server assign a sticky
             // experiment variant; older servers ignore the parameter.
             var query = new Dictionary<string, string> { ["customer"] = CustomerId() };
+            // REV-268: the device facts ride along so targeting rules see THIS
+            // device on THIS request, and the server stores them as device.*
+            // attributes. Older servers ignore the header.
+            var header = DeviceHeader();
+            var headers = header == null
+                ? null
+                : new Dictionary<string, string> { ["X-Revnix-Device"] = header };
             try
             {
-                var raw = await Request("GET", new[] { "v1", "placements", key, "offering" }, null, query);
+                var raw = await Request("GET", new[] { "v1", "placements", key, "offering" }, null, query, headers);
                 var resolution = Decode(raw, PlacementResolution.FromJson);
                 _config.Storage.Set(PlacementKey(key), raw);
                 return resolution;
@@ -347,6 +361,36 @@ namespace Revnix
                 {
                     throw err;
                 }
+            }
+        }
+
+        /// <summary>REV-268: assemble the device facts once. installedAt is the
+        /// first launch this storage ever saw — written then, read back on every
+        /// later one — and firstOpen is true for the whole of that first
+        /// session.</summary>
+        private string DeviceHeader()
+        {
+            lock (_lock)
+            {
+                if (_deviceHeaderBuilt) return _deviceHeader;
+                _deviceHeaderBuilt = true;
+                if (!_config.SendDeviceFacts || _config.Device == null) return null;
+                long installedAt;
+                bool firstOpen;
+                var stored = _config.Storage.Get(KeyInstalledAt);
+                if (stored != null && long.TryParse(stored, out var parsed) && parsed > 0)
+                {
+                    installedAt = parsed;
+                    firstOpen = false;
+                }
+                else
+                {
+                    installedAt = _config.Now();
+                    firstOpen = true;
+                    _config.Storage.Set(KeyInstalledAt, installedAt.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+                _deviceHeader = _config.Device.EncodedHeader(SdkVersion, installedAt, firstOpen);
+                return _deviceHeader;
             }
         }
 
@@ -535,7 +579,8 @@ namespace Revnix
         }
 
         private async Task<string> Request(string method, string[] segments,
-            Dictionary<string, object> body = null, Dictionary<string, string> query = null)
+            Dictionary<string, object> body = null, Dictionary<string, string> query = null,
+            Dictionary<string, string> extraHeaders = null)
         {
             var url = BuildUrl(segments, query);
             var headers = new Dictionary<string, string>
@@ -543,6 +588,10 @@ namespace Revnix
                 ["Authorization"] = "Bearer " + _config.ApiKey,
                 ["X-Revnix-SDK"] = "revnix-unity/" + SdkVersion,
             };
+            if (extraHeaders != null)
+            {
+                foreach (var pair in extraHeaders) headers[pair.Key] = pair.Value;
+            }
             if (body != null) headers["Content-Type"] = "application/json";
             if (_bgFailures > 0)
             {

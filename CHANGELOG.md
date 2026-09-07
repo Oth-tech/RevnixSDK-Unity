@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Device attribute contract.** `ResolvePlacement` sends the device facts —
+  platform, OS version, app version, locale, currency, model, install date,
+  SDK version, sandbox, first open — as `X-Revnix-Device`, so targeting rules
+  and audiences can use them from the first launch and the dashboard shows
+  them on the customer as `device.*` attributes. `RevnixSdk.Configure` fills
+  `RevnixConfig.Device` from `UnityDeviceFacts.Detect()`; a partial
+  `Device` you set keeps its fields; `SendDeviceFacts = false` disables. Unity
+  IAP exposes no storefront, so set `Device.Storefront` yourself if the app
+  knows it. (REV-268)
+
 - **Three style fields the designs use now reach the renderer.** `translate`,
   `clipPath` and `fillSize` were named by no field on the block style, so the
   decoder dropped them before the renderer ever saw them. `translate` is now

@@ -52,5 +52,16 @@ namespace Revnix
         /// <summary>Injectable async delay for tests (ms).</summary>
         public Func<int, System.Threading.Tasks.Task> Delay =
             ms => System.Threading.Tasks.Task.Delay(ms);
+
+        /// <summary>REV-268: facts about the device, sent with every placement
+        /// resolve so targeting rules can be evaluated on the request that
+        /// serves the paywall, and stored on the customer as reserved
+        /// <c>device.*</c> attributes. Unity's facade fills this from
+        /// <c>SystemInfo</c> / <c>Application</c> when left null; set
+        /// <see cref="SendDeviceFacts"/> false to send nothing.</summary>
+        public DeviceFacts Device;
+
+        /// <summary>False disables the device attribute header entirely.</summary>
+        public bool SendDeviceFacts = true;
     }
 }

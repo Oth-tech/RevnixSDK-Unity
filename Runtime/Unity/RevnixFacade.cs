@@ -48,6 +48,7 @@ namespace Revnix.Unity
                 BaseUrl = baseUrl,
                 Http = new UnityWebRequestHttp(),
                 Storage = new PlayerPrefsStorage(),
+                Device = UnityDeviceFacts.Detect(),
                 OnDiagnostic = onDiagnostic ?? (d => Debug.Log("[Revnix] " + d.Op + ": " + d.Message)),
             };
             return Configure(config);
@@ -62,6 +63,13 @@ namespace Revnix.Unity
             if (config.Storage == null || config.Storage is MemoryStorage)
             {
                 config.Storage = new PlayerPrefsStorage();
+            }
+            // REV-268: an app that brings its own config still gets the device
+            // facts unless it said not to; a partial Device it set keeps its
+            // own fields and takes the detected ones for the rest.
+            if (config.SendDeviceFacts)
+            {
+                config.Device = UnityDeviceFacts.Detect().OverriddenBy(config.Device);
             }
             _client = new RevnixClient(config);
 

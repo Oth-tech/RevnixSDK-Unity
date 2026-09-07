@@ -75,5 +75,16 @@ namespace Revnix.Unity.UI
         /// </para>
         /// </summary>
         public Action<string> OnDiagnostic;
+
+        /// <summary>
+        /// REV-271: which language a designed paywall draws its copy in. Null
+        /// uses the device's own, which is what makes the paywall match the
+        /// rest of the game; set it when the game has its own language menu,
+        /// so the paywall follows the game rather than the OS. A paywall with
+        /// no translations ignores it, and any string the chosen language does
+        /// not translate falls back to the authored copy rather than rendering
+        /// blank.
+        /// </summary>
+        public string Locale;
     }
 }

@@ -349,7 +349,12 @@ namespace Revnix.Unity.UI
         /// </summary>
         private bool BuildBlocks()
         {
-            var doc = PaywallBlockDoc.Parse(_config.Blocks);
+            // REV-271: the language overlay is applied ONCE, here, so every
+            // draw path below reads plain strings and none can forget to
+            // localize one. A paywall with no translations returns itself.
+            var doc = RevnixLocale.Localize(
+                PaywallBlockDoc.Parse(_config.Blocks),
+                _options.Locale ?? RevnixLocale.DeviceLocale());
             if (doc == null) return false;
 
             var packages = new List<BlockPackage>();

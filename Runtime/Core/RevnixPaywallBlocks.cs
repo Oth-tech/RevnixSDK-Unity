@@ -513,6 +513,17 @@ namespace Revnix
         public List<PaywallBlock> Children;
 
         /// <summary>
+        /// A field-for-field copy. REV-271 localizes into copies rather than
+        /// editing in place: a parsed document can be rendered more than once,
+        /// and overwriting its strings would make the first language drawn
+        /// permanent for the life of the document.
+        /// </summary>
+        public PaywallBlock ShallowCopy()
+        {
+            return (PaywallBlock)MemberwiseClone();
+        }
+
+        /// <summary>
         /// This block drawn with another style — how the renderer hands a
         /// block its effective (selected-context) style without mutating the
         /// document, which is redrawn on every selection change. A shallow
@@ -568,6 +579,22 @@ namespace Revnix
         public List<PaywallBlock> Blocks = new List<PaywallBlock>();
 
         /// <summary>
+        /// REV-271: the design's translations. Empty for a paywall published
+        /// in one language, which is every paywall written before this shipped
+        /// — <see cref="RevnixLocale.Localize"/> is then a no-op and the tree
+        /// renders exactly as authored.
+        /// </summary>
+        public PaywallLocalization Localization = new PaywallLocalization();
+
+        /// <summary>Field-for-field copy; see
+        /// <see cref="PaywallBlock.ShallowCopy"/> for why localization needs
+        /// one.</summary>
+        public PaywallBlockDoc ShallowCopy()
+        {
+            return (PaywallBlockDoc)MemberwiseClone();
+        }
+
+        /// <summary>
         /// Turns the raw <c>config.blocks</c> into a document, or null when it
         /// is not one. Never throws — a malformed tree costs the DESIGN, and
         /// the caller still shows the classic paywall the customer can buy
@@ -587,6 +614,7 @@ namespace Revnix
                 Accent = RevnixJson.GetString(map, "accent", "#6478ff"),
                 AccentInk = RevnixJson.GetString(map, "accentInk", "#FFFFFF"),
                 FontFamily = RevnixJson.GetString(map, "fontFamily"),
+                Localization = PaywallLocalization.Parse(map),
             };
             // `background` is a plain string in the original form and an object
             // in the layered one. The object's ground field is `color` —

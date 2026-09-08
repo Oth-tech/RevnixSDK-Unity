@@ -40,7 +40,8 @@ namespace Revnix.Unity
         public static RevnixClient Configure(
             string apiKey,
             string baseUrl,
-            Action<RevnixDiagnostic> onDiagnostic = null)
+            Action<RevnixDiagnostic> onDiagnostic = null,
+            Action<RevnixImplicitTrigger> onImplicitPaywall = null)
         {
             var config = new RevnixConfig
             {
@@ -50,6 +51,9 @@ namespace Revnix.Unity
                 Storage = new PlayerPrefsStorage(),
                 Device = UnityDeviceFacts.Detect(),
                 OnDiagnostic = onDiagnostic ?? (d => Debug.Log("[Revnix] " + d.Op + ": " + d.Message)),
+                // REV-272: passing a handler is what turns implicit placements
+                // on — see RevnixConfig.OnImplicitPaywall.
+                OnImplicitPaywall = onImplicitPaywall,
             };
             return Configure(config);
         }
@@ -71,6 +75,17 @@ namespace Revnix.Unity
             {
                 config.Device = UnityDeviceFacts.Detect().OverriddenBy(config.Device);
             }
+            // REV-272: foreground detection needs a MonoBehaviour, and only
+            // the facade is allowed to touch UnityEngine — created lazily so a
+            // game that never turns implicit placements on never gets a hidden
+            // GameObject it did not ask for.
+            if (config.Lifecycle == null && config.ImplicitPlacementsEnabled)
+            {
+                config.Lifecycle = RevnixLifecycleBehaviour.Create();
+            }
+            // A re-configure retires the previous client's foreground observer,
+            // or two would mint a session apiece on every return.
+            if (_client != null) _client.StopImplicitPlacements();
             _client = new RevnixClient(config);
 
             // Launch chores, deliberately not awaited: neither may delay the
@@ -89,12 +104,16 @@ namespace Revnix.Unity
                 await client.RegisterInstall(
                     platform: Application.platform.ToString(),
                     appVersion: Application.version);
+                // REV-272: last of the launch chores — a no-op unless the game
+                // opted in, and it must not delay the two above.
+                await client.StartImplicitPlacements();
             }
             catch (Exception)
             {
-                // RetryPendingPurchases/RegisterInstall already route failures
-                // to OnDiagnostic; this guard only keeps an unexpected bug from
-                // surfacing as an unobserved async-void crash.
+                // RetryPendingPurchases/RegisterInstall/StartImplicitPlacements
+                // already route failures to OnDiagnostic; this guard only keeps
+                // an unexpected bug from surfacing as an unobserved async-void
+                // crash.
             }
         }
     }

@@ -139,6 +139,31 @@ await revnix.LogPaywallClosed(viewId, "main_paywall", placement.Paywall.PaywallI
 All of these are fire-and-forget and pure ledger history: over-reporting can
 skew a report, it can never grant or revoke access.
 
+### Implicit placements
+
+Six placements resolve without a `ResolvePlacement` call: `app_install`,
+`app_launch`, `session_start`, `deeplink_open`, `paywall_decline` and
+`transaction_abandon`. Passing `onImplicitPaywall` to `RevnixSdk.Configure`
+turns them on (off by default); the facade creates a hidden, scene-surviving
+GameObject whose `OnApplicationPause` / `OnApplicationFocus` feed
+`session_start`, and the SDK asks `GET /v1/config` once so a game that
+configured none of the six costs one cached request per launch.
+
+```csharp
+RevnixSdk.Configure("rvx_pk_live_…", "https://….convex.site",
+    onImplicitPaywall: trigger =>
+        // Background continuation — dispatch before touching the scene.
+        MainThread.Enqueue(() => ShowPaywall(trigger.Resolution)));
+
+// deeplink_open is the one moment the SDK cannot see itself:
+Application.deepLinkActivated += url => _ = RevnixSdk.Client.HandleDeepLink(url);
+```
+
+Set `PlacementKey = trigger.Resolution.PlacementKey` on the paywall options —
+that marks the display as implicit and is what stops a `paywall_decline`
+paywall from firing `paywall_decline` again. A close is a decline: never
+report one for a display that ended in a purchase.
+
 ## Targeting an A/B audience
 
 An experiment can be narrowed to an audience: conditions over customer

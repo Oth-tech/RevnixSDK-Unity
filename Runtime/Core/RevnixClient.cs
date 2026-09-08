@@ -45,12 +45,330 @@ namespace Revnix
         private string _deviceHeader;
         private bool _deviceHeaderBuilt;
 
+        // REV-272: implicit placements. Off unless the host said what to do
+        // with a paywall — without a handler there is nothing to do with the
+        // answer, and firing anyway would spend requests and ledger rows on
+        // nobody's behalf.
+        private bool ImplicitEnabled => _config.ImplicitPlacementsEnabled;
+        /// <summary>Which of the six this app has configured. One in-flight
+        /// task, coalesced; a SUCCESS is memoised for the client's lifetime, a
+        /// FAILURE clears the field so the next moment asks again — an offline
+        /// cold start must not disable every implicit moment until the next
+        /// launch. <see cref="_implicitConfigRetryAt"/> keeps that retry from
+        /// happening on every paywall close of an offline session: one probe
+        /// per minute.</summary>
+        private Task<HashSet<string>> _implicitConfig;
+        private long _implicitConfigRetryAt = long.MinValue;
+        private const long ImplicitConfigRetryHoldMs = 60_000;
+        private Action _lifecycleCancel;
+        /// <summary>When the app last went to the BACKGROUND, or null while it
+        /// has not. A return after <c>SessionTimeout</c> away is a new session;
+        /// sooner is an app switch. Measured from the background transition,
+        /// not from the last return — the latter would mint a session after 35
+        /// minutes of continuous play plus a three-second switch.</summary>
+        private long? _lastBackgroundAt;
+        /// <summary>LOOP GUARD: view ids of displays that came FROM an implicit
+        /// trigger. A paywall shown because a paywall was dismissed must not
+        /// itself fire `paywall_decline`, or the player is handed the same
+        /// screen forever. Never released — a double-tapped close reports two
+        /// closes on one id, and releasing on the first would let the second
+        /// re-enter the loop. Bounded by implicit displays per process.</summary>
+        private readonly HashSet<string> _implicitViewIds = new HashSet<string>();
+        private bool _implicitStarted;
+        /// <summary>Set by <see cref="StopImplicitPlacements"/>. Checked after
+        /// every await on the implicit paths — a launch batch mid-flight when
+        /// the client was retired must not hand a paywall to a host that has
+        /// moved on.</summary>
+        private volatile bool _implicitStopped;
+        /// <summary>The cold-start batch while it runs, completing with whether
+        /// it presented. A deep link delivered on the first frame waits for it,
+        /// or the player gets the launch paywall AND the link paywall.</summary>
+        private Task<bool> _launchBatch;
+        /// <summary>True when <see cref="CustomerId"/> minted the id on THIS
+        /// launch — the install signal, the same one /v1/installs uses. In
+        /// memory on purpose: a stored "seen this id" marker would fire
+        /// <c>app_install</c> for the entire existing base on the first launch
+        /// after an SDK upgrade, and again after every <see cref="Logout"/>.</summary>
+        private volatile bool _mintedThisLaunch;
+
         public RevnixClient(RevnixConfig config)
         {
             if (string.IsNullOrEmpty(config.ApiKey)) throw new ArgumentException("ApiKey is required");
             if (string.IsNullOrEmpty(config.BaseUrl)) throw new ArgumentException("BaseUrl is required");
             if (config.Http == null) throw new ArgumentException("Http transport is required");
             _config = config;
+        }
+
+        // ── Implicit placements (REV-272) ────────────────────────────────────
+
+        /// <summary>
+        /// Begin watching for the six implicit moments. The Unity facade calls
+        /// this after Configure; idempotent, and <see cref="StopImplicitPlacements"/>
+        /// makes it callable again. A no-op when implicit placements are off.
+        ///
+        /// A cold start is always both a launch AND a session — an operator who
+        /// configured only <c>session_start</c> still wants the first one — and
+        /// it is an install too when this launch minted the customer id. The
+        /// three run in order, most specific first, and only the first that
+        /// resolves to a paywall is handed to the host. All are still REPORTED
+        /// — a launch is a launch whether or not a paywall showed — but a game
+        /// that configured all three must not have three paywalls pushed onto
+        /// its first frame.
+        /// </summary>
+        public async Task StartImplicitPlacements()
+        {
+            if (!ImplicitEnabled || _implicitStarted) return;
+            _implicitStarted = true;
+            _implicitStopped = false;
+
+            // Subscribed BEFORE the batch, which can take a full network
+            // timeout when offline: a player who backgrounds the game during
+            // that window and comes back an hour later is a session, and
+            // missing the background transition would lose it.
+            if (_config.Lifecycle != null)
+            {
+                try
+                {
+                    _lifecycleCancel = _config.Lifecycle.OnStateChange(OnAppState);
+                }
+                catch (Exception err)
+                {
+                    // A broken adapter costs session detection, not the client.
+                    Diagnostic("lifecycleSubscribe", err.Message);
+                }
+            }
+
+            // CustomerId() is what sets _mintedThisLaunch, so it runs first.
+            CustomerId();
+            var moments = new List<RevnixImplicitPlacement>();
+            if (_mintedThisLaunch) moments.Add(RevnixImplicitPlacement.AppInstall);
+            moments.Add(RevnixImplicitPlacement.AppLaunch);
+            moments.Add(RevnixImplicitPlacement.SessionStart);
+
+            var batch = RunLaunchBatch(moments);
+            _launchBatch = batch;
+            await batch;
+            _launchBatch = null;
+        }
+
+        private async Task<bool> RunLaunchBatch(List<RevnixImplicitPlacement> moments)
+        {
+            var presented = false;
+            foreach (var placement in moments)
+            {
+                var shown = await FireImplicit(placement, null, !presented);
+                presented = presented || shown;
+            }
+            return presented;
+        }
+
+        /// <summary>Stop watching. A replaced client would otherwise keep a
+        /// foreground observer alive and mint a session on every return
+        /// alongside its successor. Anything mid-flight is told to hand
+        /// nothing over.</summary>
+        public void StopImplicitPlacements()
+        {
+            _implicitStopped = true;
+            _implicitStarted = false;
+            var cancel = _lifecycleCancel;
+            _lifecycleCancel = null;
+            if (cancel != null) cancel();
+        }
+
+        /// <summary>
+        /// REV-272: hand the SDK the URL that opened your game, from wherever
+        /// you already receive it (<c>Application.deepLinkActivated</c>,
+        /// <c>Application.absoluteURL</c>).
+        ///
+        /// This is the one implicit moment the SDK cannot see for itself — the
+        /// URL reaches your own entry point. Does nothing unless
+        /// <c>deeplink_open</c> is configured. Delivered on the first frame,
+        /// while the cold-start batch is still deciding what to show, it waits
+        /// for the batch and presents only if the batch showed nothing — the
+        /// moment is reported either way.
+        /// </summary>
+        public async Task HandleDeepLink(string url)
+        {
+            var extra = new Dictionary<string, object>
+            {
+                ["url"] = url == null ? "" : (url.Length > 1024 ? url.Substring(0, 1024) : url),
+            };
+            var batch = _launchBatch;
+            var present = batch == null || !(await batch);
+            await FireImplicit(RevnixImplicitPlacement.DeeplinkOpen, extra, present);
+        }
+
+        private async void OnAppState(RevnixAppState state)
+        {
+            try
+            {
+                if (_implicitStopped) return;
+                if (state == RevnixAppState.Background)
+                {
+                    // First report wins: a platform that repeats "background"
+                    // (pause AND focus-loss both firing) must not keep resetting
+                    // the clock forward.
+                    if (_lastBackgroundAt == null) _lastBackgroundAt = _config.Now();
+                    return;
+                }
+                // A foreground with no background before it is the launch
+                // itself, which the batch already counted.
+                var since = _lastBackgroundAt;
+                _lastBackgroundAt = null;
+                if (since == null) return;
+                // An app switch is not a session.
+                if (_config.Now() - since.Value >= (long)_config.SessionTimeout.TotalMilliseconds)
+                {
+                    // A new session is also when the memoised config is
+                    // re-asked: the server promises an operator's change shows
+                    // up within ~30 s, and a process backgrounded for days would
+                    // otherwise keep firing a moment the operator turned off —
+                    // or never fire one they turned on — until the next launch.
+                    lock (_lock) { _implicitConfig = null; }
+                    await FireImplicit(RevnixImplicitPlacement.SessionStart);
+                }
+            }
+            catch (Exception err)
+            {
+                // async void: an escaping exception would be an unobserved
+                // crash rather than a diagnostic.
+                Diagnostic("implicitForeground", err.Message);
+            }
+        }
+
+        /// <summary>Which of the six this game has configured. See
+        /// <see cref="_implicitConfig"/>.</summary>
+        private Task<HashSet<string>> ImplicitConfig()
+        {
+            lock (_lock)
+            {
+                if (_implicitConfig != null) return _implicitConfig;
+                // Inside the hold after a failure: answer "none" without a
+                // request.
+                if (_config.Now() < _implicitConfigRetryAt)
+                {
+                    return Task.FromResult(new HashSet<string>());
+                }
+                _implicitConfig = LoadImplicitConfig();
+                return _implicitConfig;
+            }
+        }
+
+        private async Task<HashSet<string>> LoadImplicitConfig()
+        {
+            try
+            {
+                // The id does not change the answer — this route is
+                // customer-independent — it only picks the server's rate-limit
+                // bucket, so one busy game cannot 429 its own fleet off the
+                // feature.
+                var raw = await Request(
+                    "GET",
+                    new[] { "v1", "config" },
+                    null,
+                    new Dictionary<string, string> { ["customer"] = CustomerId() });
+                return RevnixImplicitConfig.Parse(raw);
+            }
+            catch (Exception err)
+            {
+                Diagnostic("implicitConfig", err.Message);
+                // Only a SUCCESSFUL read is memoised: an offline cold start
+                // must not disable every implicit moment for the rest of the
+                // session. Retried after a short hold rather than on the very
+                // next moment, so an offline burst of paywall interactions
+                // costs one probe, not one each.
+                lock (_lock)
+                {
+                    _implicitConfig = null;
+                    _implicitConfigRetryAt = _config.Now() + ImplicitConfigRetryHoldMs;
+                }
+                return new HashSet<string>();
+            }
+        }
+
+        /// <summary>Report one implicit moment and present whatever it resolves
+        /// to. Returns true when a paywall was handed to the host.
+        /// <c>present</c> false still reports the moment (its ledger event is a
+        /// fact either way) but hands nothing over — how the launch batch keeps
+        /// a cold start to ONE paywall. Never throws: this runs on a launch and
+        /// on every return to the foreground.</summary>
+        private async Task<bool> FireImplicit(
+            RevnixImplicitPlacement placement,
+            Dictionary<string, object> extra = null,
+            bool present = true)
+        {
+            if (!ImplicitEnabled || _implicitStopped) return false;
+            var key = RevnixImplicitPlacements.KeyOf(placement);
+            var configured = await ImplicitConfig();
+            // The common case for five of the six in most apps: nothing
+            // attached, so nothing is sent and no ledger row is written.
+            if (!configured.Contains(key) || _implicitStopped) return false;
+
+            var body = new Dictionary<string, object>
+            {
+                ["customerId"] = CustomerId(),
+                ["placement"] = key,
+                // One id per occurrence: retries of the same launch are
+                // absorbed, a genuine second launch counts separately.
+                // Required server-side for the three that append an event.
+                ["occurrenceId"] = Guid.NewGuid().ToString("D").ToLowerInvariant(),
+                ["occurredAt"] = _config.Now(),
+                ["sdkVersion"] = SdkVersion,
+            };
+            if (extra != null)
+            {
+                foreach (var pair in extra) body[pair.Key] = pair.Value;
+            }
+            var header = DeviceHeader();
+            var headers = header == null
+                ? null
+                : new Dictionary<string, string> { ["X-Revnix-Device"] = header };
+            try
+            {
+                var raw = await Request(
+                    "POST", new[] { "v1", "placements", "triggered" }, body, null, headers);
+                // The route's own body shape, read before the model decode: an
+                // unconfigured moment answers 200 with `paywall: null` and no
+                // `status` at all — a normal state, not a failure to count
+                // against the server.
+                if (!RevnixImplicitConfig.Resolved(raw) || !present || _implicitStopped)
+                {
+                    return false;
+                }
+                var resolution = Decode(raw, PlacementResolution.FromJson);
+                if (resolution.Paywall == null) return false;
+                var handler = _config.OnImplicitPaywall;
+                if (handler == null) return false;
+                handler(new RevnixImplicitTrigger
+                {
+                    Placement = placement,
+                    Resolution = resolution,
+                });
+                return true;
+            }
+            catch (Exception err)
+            {
+                _bgFailures += 1;
+                Diagnostic("implicit:" + key, err.Message);
+                return false;
+            }
+        }
+
+        /// <summary>The two moments that happen ON a paywall, with the loop
+        /// guard applied. <c>fromPaywallId</c> travels so the server can refuse
+        /// to hand back the very paywall being dismissed.</summary>
+        private async Task FireImplicitFromPaywall(
+            RevnixImplicitPlacement placement, string viewId, string paywallId)
+        {
+            if (!ImplicitEnabled) return;
+            lock (_lock)
+            {
+                // One hop, never a chain: this display was itself implicit.
+                if (_implicitViewIds.Contains(viewId)) return;
+            }
+            var extra = new Dictionary<string, object> { ["fromViewId"] = viewId };
+            if (paywallId != null) extra["fromPaywallId"] = paywallId;
+            await FireImplicit(placement, extra);
         }
 
         // ── Identity ─────────────────────────────────────────────────────────
@@ -62,6 +380,9 @@ namespace Revnix
             if (existing != null) return existing;
             var minted = RevnixIdentity.GenerateAnonymousId();
             _config.Storage.Set(KeyCustomerId, minted);
+            // REV-272: the install signal. Logout() below deliberately does not
+            // set it — a new anonymous session is not a new install.
+            _mintedThisLaunch = true;
             return minted;
         }
 
@@ -439,6 +760,17 @@ namespace Revnix
         public async Task<string> LogPaywallDisplay(string placementKey = null, string paywallId = null)
         {
             var viewId = Guid.NewGuid().ToString("D").ToLowerInvariant();
+            // REV-272 LOOP GUARD: a display whose placement is one of the six
+            // came FROM an implicit trigger, so its dismissal must not fire
+            // another one — otherwise "show a win-back when a paywall is
+            // declined" hands the player the same screen until they quit.
+            // Recognised from the placementKey the caller reports; a caller
+            // that reports none cannot be protected here, which is why the
+            // server keeps its own same-paywall backstop.
+            if (ImplicitEnabled && RevnixImplicitPlacements.FromKey(placementKey) != null)
+            {
+                lock (_lock) { _implicitViewIds.Add(viewId); }
+            }
             var body = new Dictionary<string, object>
             {
                 ["customerId"] = CustomerId(),
@@ -463,6 +795,11 @@ namespace Revnix
         /// Fire-and-forget dismissal beacon (REV-252) — the other half of a
         /// display's life. Idempotent per view id, exactly like the view
         /// report. Pass the id <see cref="LogPaywallDisplay"/> returned.
+        ///
+        /// A close is a DECLINE. Do not report one for a display that ended in
+        /// a purchase — with implicit placements on, a close is also the
+        /// <c>paywall_decline</c> moment, and a win-back offer seconds after a
+        /// successful purchase is the one thing an operator never means.
         /// </summary>
         public async Task LogPaywallClosed(string viewId, string placementKey = null, string paywallId = null)
         {
@@ -483,6 +820,11 @@ namespace Revnix
                 _bgFailures += 1;
                 Diagnostic("logPaywallClosed", err.Message);
             }
+            // REV-272: the dismissal IS the `paywall_decline` moment. No second
+            // ledger event — the server reuses the paywall.closed just reported
+            // — so this is only the resolve that decides what is attached.
+            await FireImplicitFromPaywall(
+                RevnixImplicitPlacement.PaywallDecline, viewId ?? "", paywallId);
         }
 
         /// <summary>
@@ -546,6 +888,14 @@ namespace Revnix
             {
                 _bgFailures += 1;
                 Diagnostic("logPaywallEvent", err.Message);
+            }
+            // REV-272: backing out of the store sheet is the
+            // `transaction_abandon` moment. Reuses the
+            // paywall.purchase_abandoned just reported.
+            if (evt == RevnixPaywallEvent.PurchaseAbandoned)
+            {
+                await FireImplicitFromPaywall(
+                    RevnixImplicitPlacement.TransactionAbandon, viewId ?? "", paywallId);
             }
         }
 

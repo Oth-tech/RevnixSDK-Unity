@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **`IsEntitled` honours a revoked key.** A deliberate rejection
+  (401/403/404/409) now answers false instead of the cached snapshot;
+  transient failures still serve the cache.
+
 - **Device attribute contract.** `ResolvePlacement` sends the device facts —
   platform, OS version, app version, locale, currency, model, install date,
   SDK version, sandbox, first open — as `X-Revnix-Device`, so targeting rules

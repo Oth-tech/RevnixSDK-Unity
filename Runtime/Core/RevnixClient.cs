@@ -489,7 +489,7 @@ namespace Revnix
             return ApplyOfflinePolicy(entry, nowMs, UpdateWallClock(nowMs));
         }
 
-        /// <summary>Gate helper — never throws; unknown/unreachable = locked.</summary>
+        /// <summary>Gate helper: never throws. A transient failure answers from the offline cache; a deliberate rejection (401/403/404/409), an unknown id, or no cache answers false.</summary>
         public async Task<bool> IsEntitled(string entitlementId)
         {
             CustomerEntitlements snapshot;
@@ -499,7 +499,7 @@ namespace Revnix
             }
             catch (RevnixException)
             {
-                snapshot = CachedEntitlements();
+                snapshot = null;
             }
             return snapshot != null && snapshot.IsEntitled(entitlementId);
         }

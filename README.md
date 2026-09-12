@@ -27,12 +27,17 @@ and `revnix_flutter`, ported to C#:
 - **Audience targeting**: `SetAttributes` writes the customer attributes
   those experiments target, so a mobile-only game can run "US players on
   4.2+" tests.
-- **Optional Unity IAP bridge**: auto-detected via version defines; maps a
-  purchased `Product` straight to a registration.
+- **Device facts**: `ResolvePlacement` sends platform, OS and app version,
+  locale, currency, model, sandbox, install date and first open as
+  `X-Revnix-Device`, so targeting rules can use them; `SendDeviceFacts = false`
+  disables.
+- **Optional Unity IAP bridge**: auto-detected via version defines
+  (`com.unity.purchasing` 4.0.0+); maps a purchased `Product` straight to a
+  registration.
 
 ## Install
 
-Package Manager → *Add package from git URL*:
+Requires Unity 2021.3 or later. Package Manager → *Add package from git URL*:
 
 ```
 https://github.com/Oth-tech/RevnixSDK-Unity.git
@@ -46,6 +51,7 @@ to `Packages/manifest.json`.)
 ```csharp
 using Revnix;
 using Revnix.Unity;
+using Revnix.Unity.IAP;
 
 var revnix = RevnixSdk.Configure(
     "rvx_pk_live_…",                      // publishable key only, never rvx_sk_
@@ -108,8 +114,8 @@ otherwise opens via `Application.OpenURL`.
 
 ### Reporting the whole life of a display
 
-Passing `Client` reports the impression, and `RevnixPaywallView` pairs the
-close for you. Drawing your own paywall, the three calls are yours:
+Passing `Client` reports the impression, and with `OnClose` set
+`RevnixPaywallView` pairs the close for you. Drawing your own paywall, the three calls are yours:
 
 | Call | What it does |
 |---|---|
@@ -146,14 +152,16 @@ Six placements resolve without a `ResolvePlacement` call: `app_install`,
 `transaction_abandon`. Passing `onImplicitPaywall` to `RevnixSdk.Configure`
 turns them on (off by default); the facade creates a hidden, scene-surviving
 GameObject whose `OnApplicationPause` / `OnApplicationFocus` feed
-`session_start`, and the SDK asks `GET /v1/config` once so a game that
-configured none of the six costs one cached request per launch.
+`session_start`, and the SDK asks `GET /v1/config` at launch and at each new
+session, so a game that configured none of the six costs that request and
+nothing else.
 
 ```csharp
+var mainThread = System.Threading.SynchronizationContext.Current;
 RevnixSdk.Configure("rvx_pk_live_…", "https://….convex.site",
     onImplicitPaywall: trigger =>
         // Background continuation — dispatch before touching the scene.
-        MainThread.Enqueue(() => ShowPaywall(trigger.Resolution)));
+        mainThread.Post(_ => ShowPaywall(trigger.Resolution), null));
 
 // deeplink_open is the one moment the SDK cannot see itself:
 Application.deepLinkActivated += url => _ = RevnixSdk.Client.HandleDeepLink(url);

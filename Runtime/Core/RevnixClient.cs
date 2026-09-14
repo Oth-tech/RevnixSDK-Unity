@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace Revnix
@@ -26,6 +27,9 @@ namespace Revnix
         private const long ExpiryGraceMs = 3L * 24 * 3600 * 1000;
         private const long RollbackToleranceMs = 5L * 60 * 1000;
         private const int CacheCustomers = 4;
+
+        private static readonly Regex PreviewTokenRe =
+            new Regex(@"[?&]revnix_preview=([0-9a-f]{64})(?:[&#]|$)");
 
         private const string KeyCustomerId = "revnix.customerId";
         private const string KeyWallClock = "revnix.lastWallClock";
@@ -181,14 +185,22 @@ namespace Revnix
         /// <c>Application.absoluteURL</c>).
         ///
         /// This is the one implicit moment the SDK cannot see for itself — the
-        /// URL reaches your own entry point. Does nothing unless
-        /// <c>deeplink_open</c> is configured. Delivered on the first frame,
-        /// while the cold-start batch is still deciding what to show, it waits
-        /// for the batch and presents only if the batch showed nothing — the
-        /// moment is reported either way.
+        /// URL reaches your own entry point. An ordinary link does nothing
+        /// unless <c>deeplink_open</c> is configured. A dashboard QR/link
+        /// preview (<c>&lt;scheme&gt;://revnix-preview?revnix_preview=&lt;token&gt;</c>)
+        /// is always fetched and handed to <see cref="RevnixConfig.OnImplicitPaywall"/>
+        /// — it never fires <c>deeplink_open</c>. Delivered on the first
+        /// frame, while the cold-start batch is still deciding what to show,
+        /// both paths wait for the batch first.
         /// </summary>
         public async Task HandleDeepLink(string url)
         {
+            var previewMatch = url != null ? PreviewTokenRe.Match(url) : Match.Empty;
+            if (previewMatch.Success)
+            {
+                await PresentPreview(previewMatch.Groups[1].Value);
+                return;
+            }
             var extra = new Dictionary<string, object>
             {
                 ["url"] = url == null ? "" : (url.Length > 1024 ? url.Substring(0, 1024) : url),
@@ -196,6 +208,31 @@ namespace Revnix
             var batch = _launchBatch;
             var present = batch == null || !(await batch);
             await FireImplicit(RevnixImplicitPlacement.DeeplinkOpen, extra, present);
+        }
+
+        private async Task PresentPreview(string token)
+        {
+            try
+            {
+                var batch = _launchBatch;
+                if (batch != null) await batch;
+                if (_implicitStopped) return;
+                var raw = await Request("GET", new[] { "v1", "paywalls", "preview", token });
+                if (_implicitStopped) return;
+                var handler = _config.OnImplicitPaywall;
+                if (handler == null) return;
+                var resolution = Decode(raw, PlacementResolution.FromJson);
+                handler(new RevnixImplicitTrigger
+                {
+                    Placement = RevnixImplicitPlacement.DeeplinkOpen,
+                    Resolution = resolution,
+                });
+            }
+            catch (Exception err)
+            {
+                _bgFailures += 1;
+                Diagnostic("preview", err.Message);
+            }
         }
 
         private async void OnAppState(RevnixAppState state)
@@ -760,6 +797,7 @@ namespace Revnix
         public async Task<string> LogPaywallDisplay(string placementKey = null, string paywallId = null)
         {
             var viewId = Guid.NewGuid().ToString("D").ToLowerInvariant();
+            if (placementKey == RevnixImplicitPlacements.PreviewPlacementKey) return viewId;
             // REV-272 LOOP GUARD: a display whose placement is one of the six
             // came FROM an implicit trigger, so its dismissal must not fire
             // another one — otherwise "show a win-back when a paywall is
@@ -803,6 +841,7 @@ namespace Revnix
         /// </summary>
         public async Task LogPaywallClosed(string viewId, string placementKey = null, string paywallId = null)
         {
+            if (placementKey == RevnixImplicitPlacements.PreviewPlacementKey) return;
             var body = new Dictionary<string, object>
             {
                 ["customerId"] = CustomerId(),
@@ -862,6 +901,7 @@ namespace Revnix
             string message = null,
             string eventId = null)
         {
+            if (placementKey == RevnixImplicitPlacements.PreviewPlacementKey) return;
             var body = new Dictionary<string, object>
             {
                 ["customerId"] = CustomerId(),

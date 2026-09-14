@@ -522,18 +522,24 @@ namespace Revnix
         /// and older servers omit the key entirely; both parse to null.</summary>
         public PlacementExperiment Experiment;
 
+        /// <summary>Set only on a dashboard QR/link preview resolution
+        /// (<c>GET /v1/paywalls/preview/{token}</c>), never on a real
+        /// resolve.</summary>
+        public bool Preview;
+
         public static PlacementResolution FromJson(Dictionary<string, object> map)
         {
             var paywall = RevnixJson.GetObject(map, "paywall");
             var experiment = RevnixJson.GetObject(map, "experiment");
             return new PlacementResolution
             {
-                Status = RevnixJson.GetString(map, "status", ""),
+                Status = RevnixJson.GetString(map, "status", "ok"),
                 PlacementKey = RevnixJson.GetString(map, "placementKey", ""),
                 Revision = RevnixJson.GetLong(map, "revision"),
                 Offering = PlacementOffering.FromJson(RevnixJson.GetObject(map, "offering") ?? new Dictionary<string, object>()),
                 Paywall = paywall != null ? PlacementPaywall.FromJson(paywall) : null,
                 Experiment = experiment != null ? PlacementExperiment.FromJson(experiment) : null,
+                Preview = RevnixJson.GetBool(map, "preview"),
             };
         }
     }

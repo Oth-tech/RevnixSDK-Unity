@@ -288,6 +288,11 @@ namespace Revnix.Unity.UI
         /// never be wired on one draw path and forgotten on the other.</summary>
         private void PurchaseAndReport(string packageId)
         {
+            if (_options.PlacementKey == RevnixImplicitPlacements.PreviewPlacementKey)
+            {
+                Debug.LogWarning("Revnix: purchases are disabled in preview.");
+                return;
+            }
             _purchaseAttempts += 1;
             ReportInteraction(
                 RevnixPaywallEvent.PurchaseStarted,

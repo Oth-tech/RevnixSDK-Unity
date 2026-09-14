@@ -52,6 +52,13 @@ namespace Revnix
             return Keys[placement];
         }
 
+        /// <summary>The placementKey <see cref="RevnixClient.HandleDeepLink"/>
+        /// reports for a dashboard QR/link preview
+        /// (<c>&lt;scheme&gt;://revnix-preview?revnix_preview=&lt;token&gt;</c>) —
+        /// not one of the six above, and never sent to
+        /// <c>/v1/placements/triggered</c>.</summary>
+        public const string PreviewPlacementKey = "revnix_preview";
+
         /// <summary>The placement for a wire key, or null when the key is not
         /// one of the six.</summary>
         public static RevnixImplicitPlacement? FromKey(string key)

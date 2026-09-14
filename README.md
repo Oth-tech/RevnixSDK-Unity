@@ -172,6 +172,13 @@ that marks the display as implicit and is what stops a `paywall_decline`
 paywall from firing `paywall_decline` again. A close is a decline: never
 report one for a display that ended in a purchase.
 
+The same `HandleDeepLink` call also recognises the dashboard's QR/link
+preview (`<scheme>://revnix-preview?revnix_preview=<token>`, scanned or
+tapped from the paywall builder): it fetches the draft paywall and hands it
+to `onImplicitPaywall` with `Resolution.PlacementKey == "revnix_preview"`,
+never firing `deeplink_open` or writing to the ledger. Purchases are
+disabled on a preview — a tap logs a warning instead.
+
 ## Targeting an A/B audience
 
 An experiment can be narrowed to an audience: conditions over customer

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Dashboard QR/link paywall preview.** `HandleDeepLink` now recognises
+  `<scheme>://revnix-preview?revnix_preview=<token>`, fetches the draft
+  paywall from `GET /v1/paywalls/preview/{token}` and hands it to
+  `onImplicitPaywall` (`Resolution.PlacementKey == "revnix_preview"`) without
+  ever firing `deeplink_open`. A preview never sends paywall analytics and
+  disables purchases in the UI.
+
 - **`IsEntitled` honours a revoked key.** A deliberate rejection
   (401/403/404/409) now answers false instead of the cached snapshot;
   transient failures still serve the cache.

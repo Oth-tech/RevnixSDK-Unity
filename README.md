@@ -164,8 +164,16 @@ RevnixSdk.Configure("rvx_pk_live_…", "https://….convex.site",
         mainThread.Post(_ => ShowPaywall(trigger.Resolution), null));
 
 // deeplink_open is the one moment the SDK cannot see itself:
+if (!string.IsNullOrEmpty(Application.absoluteURL))
+    _ = RevnixSdk.Client.HandleDeepLink(Application.absoluteURL);
 Application.deepLinkActivated += url => _ = RevnixSdk.Client.HandleDeepLink(url);
 ```
+
+`Application.absoluteURL` holds the link that launched the closed game;
+`deepLinkActivated` fires for links that arrive while it runs. Run both
+once per launch, where `Configure` runs — `absoluteURL` keeps the latest
+link for the life of the process, so reading it again on a later scene
+load would count the same open twice.
 
 Set `PlacementKey = trigger.Resolution.PlacementKey` on the paywall options —
 that marks the display as implicit and is what stops a `paywall_decline`

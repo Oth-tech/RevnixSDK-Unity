@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Deep links always record their attribution.** `HandleDeepLink` reports
+  every ordinary link, so its `link.*` attributes land on the customer with
+  no `OnImplicitPaywall` handler and no `deeplink_open` placement. A paywall
+  still presents only when implicit placements are on and `deeplink_open`
+  is configured; otherwise the report carries `resolve: false` and the
+  server stores the link facts only. A null or empty URL is ignored, and
+  `StartImplicitPlacements` after `StopImplicitPlacements` resumes
+  deep-link reporting even without a handler.
 - **Dashboard QR/link paywall preview.** `HandleDeepLink` now recognises
   `<scheme>://revnix-preview?revnix_preview=<token>`, fetches the draft
   paywall from `GET /v1/paywalls/preview/{token}` and hands it to

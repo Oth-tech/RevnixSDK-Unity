@@ -72,9 +72,12 @@ namespace Revnix
         /// and a paywall over a loading screen is worse than no paywall.
         ///
         /// Providing this handler is what TURNS IMPLICIT PLACEMENTS ON. Without
-        /// it the SDK makes no extra requests at all. With it, the SDK asks
-        /// <c>GET /v1/config</c> once and then fires only for the moments this
-        /// app has actually configured in the dashboard.
+        /// it the SDK makes no extra requests at all, except that
+        /// <see cref="RevnixClient.HandleDeepLink"/> always reports the link
+        /// it is handed — for its attribution facts, not for a paywall. With
+        /// this handler set, the SDK asks <c>GET /v1/config</c> once and then
+        /// fires only for the moments this app has actually configured in the
+        /// dashboard.
         ///
         /// Called from a background continuation, not necessarily Unity's main
         /// thread — hop to the main thread before touching the scene.
@@ -92,7 +95,10 @@ namespace Revnix
 
         /// <summary>REV-272: explicit off switch, even when
         /// <see cref="OnImplicitPaywall"/> is set. Null means "on when a
-        /// handler is present".</summary>
+        /// handler is present". With this false,
+        /// <see cref="RevnixClient.HandleDeepLink"/> still reports the link it
+        /// is handed for attribution and never presents a deep-link paywall —
+        /// except a dashboard preview link, which always presents.</summary>
         public bool? ImplicitPlacements;
 
         /// <summary>REV-272: the rule the client reads —

@@ -121,9 +121,9 @@ namespace Revnix
         /// </summary>
         public async Task StartImplicitPlacements()
         {
+            _implicitStopped = false;
             if (!ImplicitEnabled || _implicitStarted) return;
             _implicitStarted = true;
-            _implicitStopped = false;
 
             // Subscribed BEFORE the batch, which can take a full network
             // timeout when offline: a player who backgrounds the game during
@@ -185,17 +185,21 @@ namespace Revnix
         /// <c>Application.absoluteURL</c>).
         ///
         /// This is the one implicit moment the SDK cannot see for itself — the
-        /// URL reaches your own entry point. An ordinary link does nothing
-        /// unless <c>deeplink_open</c> is configured. A dashboard QR/link
+        /// URL reaches your own entry point. An ordinary link is always
+        /// reported so its <c>link.*</c> attribution facts land on the
+        /// customer; a paywall presents only when implicit placements are on
+        /// AND <c>deeplink_open</c> is configured in the dashboard. A dashboard QR/link
         /// preview (<c>&lt;scheme&gt;://revnix-preview?revnix_preview=&lt;token&gt;</c>)
         /// is always fetched and handed to <see cref="RevnixConfig.OnImplicitPaywall"/>
         /// — it never fires <c>deeplink_open</c>. Delivered on the first
         /// frame, while the cold-start batch is still deciding what to show,
-        /// both paths wait for the batch first.
+        /// both paths wait for the batch first. An empty or null URL is
+        /// ignored.
         /// </summary>
         public async Task HandleDeepLink(string url)
         {
-            var previewMatch = url != null ? PreviewTokenRe.Match(url) : Match.Empty;
+            if (string.IsNullOrEmpty(url)) return;
+            var previewMatch = PreviewTokenRe.Match(url);
             if (previewMatch.Success)
             {
                 await PresentPreview(previewMatch.Groups[1].Value);
@@ -203,7 +207,7 @@ namespace Revnix
             }
             var extra = new Dictionary<string, object>
             {
-                ["url"] = url == null ? "" : (url.Length > 1024 ? url.Substring(0, 1024) : url),
+                ["url"] = url.Length > 1024 ? url.Substring(0, 1024) : url,
             };
             var batch = _launchBatch;
             var present = batch == null || !(await batch);
@@ -334,12 +338,13 @@ namespace Revnix
             Dictionary<string, object> extra = null,
             bool present = true)
         {
-            if (!ImplicitEnabled || _implicitStopped) return false;
+            if (_implicitStopped) return false;
             var key = RevnixImplicitPlacements.KeyOf(placement);
-            var configured = await ImplicitConfig();
-            // The common case for five of the six in most apps: nothing
-            // attached, so nothing is sent and no ledger row is written.
-            if (!configured.Contains(key) || _implicitStopped) return false;
+            var resolve = ImplicitEnabled && (await ImplicitConfig()).Contains(key);
+            if ((!resolve && placement != RevnixImplicitPlacement.DeeplinkOpen) || _implicitStopped)
+            {
+                return false;
+            }
 
             var body = new Dictionary<string, object>
             {
@@ -356,6 +361,7 @@ namespace Revnix
             {
                 foreach (var pair in extra) body[pair.Key] = pair.Value;
             }
+            if (!resolve) body["resolve"] = false;
             var header = DeviceHeader();
             var headers = header == null
                 ? null
@@ -368,7 +374,7 @@ namespace Revnix
                 // unconfigured moment answers 200 with `paywall: null` and no
                 // `status` at all — a normal state, not a failure to count
                 // against the server.
-                if (!RevnixImplicitConfig.Resolved(raw) || !present || _implicitStopped)
+                if (!RevnixImplicitConfig.Resolved(raw) || !present || !resolve || _implicitStopped)
                 {
                     return false;
                 }

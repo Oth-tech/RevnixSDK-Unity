@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using NUnit.Framework;
@@ -18,6 +19,9 @@ namespace Revnix.Tests
         private const string ConfigWithDeeplinkOpen =
             "{\"revision\":1,\"implicitPlacements\":[\"deeplink_open\"]}";
 
+        private const string ConfigWithoutDeeplinkOpen =
+            "{\"revision\":1,\"implicitPlacements\":[]}";
+
         private const string TriggeredResolution =
             "{\"status\":\"ok\",\"placementKey\":\"deeplink_open\"," +
             "\"paywall\":{\"paywallId\":\"pw_live\",\"name\":\"Live\",\"config\":{}}}";
@@ -25,21 +29,24 @@ namespace Revnix.Tests
         private sealed class FakeHttp : IRevnixHttp
         {
             public readonly List<string> Calls = new List<string>();
+            public readonly List<string> JsonBodies = new List<string>();
             public int PreviewStatus = 200;
             public string PreviewBodyOverride = PreviewBody;
+            public string ConfigBodyOverride = ConfigWithDeeplinkOpen;
 
             public Task<RevnixHttpResponse> Send(
                 string method, string url, string jsonBody,
                 IReadOnlyDictionary<string, string> headers, int timeoutMs)
             {
                 Calls.Add(method + " " + url);
+                JsonBodies.Add(jsonBody);
                 if (url.Contains("/v1/paywalls/preview/"))
                 {
                     return Task.FromResult(new RevnixHttpResponse(PreviewStatus, PreviewBodyOverride));
                 }
                 if (url.Contains("/v1/config"))
                 {
-                    return Task.FromResult(new RevnixHttpResponse(200, ConfigWithDeeplinkOpen));
+                    return Task.FromResult(new RevnixHttpResponse(200, ConfigBodyOverride));
                 }
                 if (url.Contains("/v1/placements/triggered"))
                 {
@@ -49,7 +56,17 @@ namespace Revnix.Tests
             }
         }
 
-        private static RevnixClient MakeClient(FakeHttp http, out List<RevnixImplicitTrigger> seen)
+        private static string TriggeredBody(FakeHttp http)
+        {
+            var index = http.Calls.FindIndex(c => c.Contains("/v1/placements/triggered"));
+            return index >= 0 ? http.JsonBodies[index] : null;
+        }
+
+        private static RevnixClient MakeClient(
+            FakeHttp http,
+            out List<RevnixImplicitTrigger> seen,
+            bool withHandler = true,
+            bool? implicitPlacements = null)
         {
             var captured = new List<RevnixImplicitTrigger>();
             seen = captured;
@@ -58,7 +75,8 @@ namespace Revnix.Tests
                 ApiKey = "rvx_pk_test",
                 BaseUrl = "https://x",
                 Http = http,
-                OnImplicitPaywall = t => captured.Add(t),
+                OnImplicitPaywall = withHandler ? (Action<RevnixImplicitTrigger>)(t => captured.Add(t)) : null,
+                ImplicitPlacements = implicitPlacements,
             };
             return new RevnixClient(config);
         }
@@ -139,6 +157,80 @@ namespace Revnix.Tests
 
             client.LogPaywallShown("revnix_preview", "pw_preview").GetAwaiter().GetResult();
             client.LogPaywallClosed("v", "revnix_preview", "pw_preview").GetAwaiter().GetResult();
+
+            Assert.AreEqual(0, http.Calls.Count);
+        }
+
+        [Test]
+        public void NoHandlerDeepLinkOnlyReportsWithResolveFalseAndNoConfigCall()
+        {
+            var http = new FakeHttp();
+            var client = MakeClient(http, out var seen, withHandler: false);
+
+            client.HandleDeepLink("https://example.com/promo?utm_source=ig").GetAwaiter().GetResult();
+
+            Assert.AreEqual(1, http.Calls.Count);
+            Assert.IsTrue(http.Calls[0].Contains("/v1/placements/triggered"));
+            Assert.IsTrue(http.JsonBodies[0].Contains("\"resolve\":false"));
+            Assert.AreEqual(0, seen.Count);
+        }
+
+        [Test]
+        public void ImplicitOffDeepLinkSendsResolveFalseAndNeverCallsHandler()
+        {
+            var http = new FakeHttp();
+            var client = MakeClient(http, out var seen, implicitPlacements: false);
+
+            client.HandleDeepLink("https://example.com/promo").GetAwaiter().GetResult();
+
+            Assert.IsTrue(http.JsonBodies[0].Contains("\"resolve\":false"));
+            Assert.AreEqual(0, seen.Count);
+        }
+
+        [Test]
+        public void ImplicitOnDeepLinkSendsNoResolveKey()
+        {
+            var http = new FakeHttp();
+            var client = MakeClient(http, out var seen);
+
+            client.HandleDeepLink("https://example.com/promo").GetAwaiter().GetResult();
+
+            Assert.IsFalse(TriggeredBody(http).Contains("resolve"));
+        }
+
+        [Test]
+        public void ImplicitOnDeeplinkOpenNotConfiguredSendsResolveFalseAndNeverCallsHandler()
+        {
+            var http = new FakeHttp { ConfigBodyOverride = ConfigWithoutDeeplinkOpen };
+            var client = MakeClient(http, out var seen);
+
+            client.HandleDeepLink("https://example.com/promo").GetAwaiter().GetResult();
+
+            Assert.IsTrue(TriggeredBody(http).Contains("\"resolve\":false"));
+            Assert.AreEqual(0, seen.Count);
+        }
+
+        [Test]
+        public void StopThenStartClearsImplicitStoppedForANoHandlerHost()
+        {
+            var http = new FakeHttp();
+            var client = MakeClient(http, out var seen, withHandler: false);
+
+            client.StopImplicitPlacements();
+            client.StartImplicitPlacements().GetAwaiter().GetResult();
+            client.HandleDeepLink("https://example.com/promo").GetAwaiter().GetResult();
+
+            Assert.AreEqual(1, http.Calls.FindAll(c => c.Contains("/v1/placements/triggered")).Count);
+        }
+
+        [Test]
+        public void EmptyOrNullUrlIsIgnored()
+        {
+            var http = new FakeHttp();
+            var client = MakeClient(http, out var seen);
+
+            client.HandleDeepLink("").GetAwaiter().GetResult();
+            client.HandleDeepLink(null).GetAwaiter().GetResult();
 
             Assert.AreEqual(0, http.Calls.Count);
         }

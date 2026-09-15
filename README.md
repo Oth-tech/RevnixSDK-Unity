@@ -150,11 +150,12 @@ skew a report, it can never grant or revoke access.
 Six placements resolve without a `ResolvePlacement` call: `app_install`,
 `app_launch`, `session_start`, `deeplink_open`, `paywall_decline` and
 `transaction_abandon`. Passing `onImplicitPaywall` to `RevnixSdk.Configure`
-turns them on (off by default); the facade creates a hidden, scene-surviving
-GameObject whose `OnApplicationPause` / `OnApplicationFocus` feed
-`session_start`, and the SDK asks `GET /v1/config` at launch and at each new
-session, so a game that configured none of the six costs that request and
-nothing else.
+turns them on (off by default — no extra requests for the other five
+moments, though `HandleDeepLink` always reports the link it is handed); the
+facade creates a hidden, scene-surviving GameObject whose
+`OnApplicationPause` / `OnApplicationFocus` feed `session_start`, and the SDK
+asks `GET /v1/config` at launch and at each new session, so a game that
+configured none of the six costs that request and nothing else.
 
 ```csharp
 var mainThread = System.Threading.SynchronizationContext.Current;
@@ -173,7 +174,8 @@ Application.deepLinkActivated += url => _ = RevnixSdk.Client.HandleDeepLink(url)
 `deepLinkActivated` fires for links that arrive while it runs. Run both
 once per launch, where `Configure` runs — `absoluteURL` keeps the latest
 link for the life of the process, so reading it again on a later scene
-load would count the same open twice.
+load would count the same open twice. From the release after v0.2.0,
+`HandleDeepLink` also ignores a null or empty URL itself.
 
 Set `PlacementKey = trigger.Resolution.PlacementKey` on the paywall options —
 that marks the display as implicit and is what stops a `paywall_decline`

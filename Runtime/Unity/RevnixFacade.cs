@@ -41,7 +41,8 @@ namespace Revnix.Unity
             string apiKey,
             string baseUrl,
             Action<RevnixDiagnostic> onDiagnostic = null,
-            Action<RevnixImplicitTrigger> onImplicitPaywall = null)
+            Action<RevnixImplicitTrigger> onImplicitPaywall = null,
+            Action<string, DeferredDeepLinkMatch> onDeferredDeepLink = null)
         {
             var config = new RevnixConfig
             {
@@ -54,6 +55,7 @@ namespace Revnix.Unity
                 // REV-272: passing a handler is what turns implicit placements
                 // on — see RevnixConfig.OnImplicitPaywall.
                 OnImplicitPaywall = onImplicitPaywall,
+                OnDeferredDeepLink = onDeferredDeepLink,
             };
             return Configure(config);
         }
@@ -96,13 +98,26 @@ namespace Revnix.Unity
             return client;
         }
 
+        /// <summary>REV-299: hand over the raw Android Play Install Referrer
+        /// string, read yourself via the Play Install Referrer library.
+        /// Fills platform/appVersion the same way <c>Configure</c> fills them
+        /// for <see cref="RevnixClient.RegisterInstall"/>, so whichever of the
+        /// two calls reaches the server first still carries them.</summary>
+        public static void HandleInstallReferrer(string referrer)
+        {
+            _ = Client.HandleInstallReferrer(
+                referrer,
+                platform: UnityDeviceFacts.PlatformName(Application.platform),
+                appVersion: Application.version);
+        }
+
         private static async void RunLaunchChores(RevnixClient client)
         {
             try
             {
                 await client.RetryPendingPurchases();
                 await client.RegisterInstall(
-                    platform: Application.platform.ToString(),
+                    platform: UnityDeviceFacts.PlatformName(Application.platform),
                     appVersion: Application.version);
                 // REV-272: last of the launch chores — a no-op unless the game
                 // opted in, and it must not delay the two above.

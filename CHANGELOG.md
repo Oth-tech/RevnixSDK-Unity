@@ -10,6 +10,16 @@
   server stores the link facts only. A null or empty URL is ignored, and
   `StartImplicitPlacements` after `StopImplicitPlacements` resumes
   deep-link reporting even without a handler.
+- **`onDeferredDeepLink`.** `RevnixSdk.Configure(onDeferredDeepLink:)` /
+  `RevnixConfig.OnDeferredDeepLink` delivers the link a player clicked before
+  installing — exact on Android (from the install referrer), probabilistic
+  on iOS (same-network click within the last hour) — at most once per
+  install, from `RegisterInstall`'s response or from the new
+  `HandleInstallReferrer(referrer)` (Android; called from the main thread,
+  like the rest of the SDK — the callback itself is a background
+  continuation, same as `onImplicitPaywall`). `RegisterInstall` now reports
+  the install platform (`"ios"`/`"android"`) automatically. (REV-299)
+
 - **Dashboard QR/link paywall preview.** `HandleDeepLink` now recognises
   `<scheme>://revnix-preview?revnix_preview=<token>`, fetches the draft
   paywall from `GET /v1/paywalls/preview/{token}` and hands it to

@@ -189,6 +189,35 @@ to `onImplicitPaywall` with `Resolution.PlacementKey == "revnix_preview"`,
 never firing `deeplink_open` or writing to the ledger. Purchases are
 disabled on a preview — a tap logs a warning instead.
 
+### Deferred deep links
+
+A click on a Revnix link sends Android to Google Play with the query string
+as the install referrer, and iOS to the App Store, remembering the click for
+up to an hour. Only a link whose scheme matches the game's configured URL
+scheme is ever returned. Pass `onDeferredDeepLink` to `Configure` to get it,
+delivered at most once per install:
+
+```csharp
+RevnixSdk.Configure("rvx_pk_live_…", "https://….convex.site",
+    onDeferredDeepLink: (url, match) =>
+        mainThread.Post(_ => OpenUrl(url), null));
+```
+
+`RegisterInstall` (fired at startup, install platform reported as
+`"ios"`/`"android"` automatically) can only come back with a `probabilistic`
+match — a same-network click within the last hour, so it can be wrong on a
+shared network. It never carries an install referrer, so it can never answer
+`exact`.
+
+`exact` only ever comes from Android's Play Install Referrer, and only once
+your game reads it and hands the raw string to
+`RevnixSdk.HandleInstallReferrer(referrer)`, which reports it to the
+server and delivers to the same `onDeferredDeepLink` handler. Skip this call
+on Android and no deferred link — exact or probabilistic — ever arrives
+there; iOS has no referrer to read, so it relies on `RegisterInstall`'s
+probabilistic match alone. Route the URL yourself; optionally also pass it to
+`HandleDeepLink` for `deeplink_open` paywall rules.
+
 ## Targeting an A/B audience
 
 An experiment can be narrowed to an audience: conditions over customer

@@ -116,5 +116,15 @@ namespace Revnix
         /// the return to count as a new session rather than an app switch.
         /// Default 30 minutes.</summary>
         public TimeSpan SessionTimeout = RevnixImplicitPlacements.DefaultSessionTimeout;
+
+        /// <summary>Called with the link a customer clicked before
+        /// installing. Fires at most once per install, from a background
+        /// continuation like <see cref="OnImplicitPaywall"/>; route it
+        /// however you route <see cref="RevnixClient.HandleDeepLink"/>. Left
+        /// null, the SDK does nothing with the link and does not mark it
+        /// delivered — set it before the app ever calls
+        /// <see cref="RevnixClient.RegisterInstall"/> or
+        /// <see cref="RevnixClient.HandleInstallReferrer"/>.</summary>
+        public Action<string, DeferredDeepLinkMatch> OnDeferredDeepLink;
     }
 }

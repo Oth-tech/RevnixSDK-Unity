@@ -36,6 +36,7 @@ namespace Revnix
         private const string KeyQueue = "revnix.pendingPurchases";
         private const string KeyCacheIndex = "revnix.entIndex";
         private const string KeyInstalledAt = "revnix.installedAt";
+        private const string KeyDeferredDeepLinkDelivered = "revnix.deferredDeepLinkDelivered";
 
         private readonly RevnixConfig _config;
         private readonly object _lock = new object();
@@ -772,13 +773,79 @@ namespace Revnix
             if (appVersion != null) body["appVersion"] = appVersion;
             try
             {
-                await Request("POST", new[] { "v1", "installs" }, body);
+                var raw = await Request("POST", new[] { "v1", "installs" }, body);
                 _config.Storage.Set(InstallReportedKey(cid), "1");
+                DeliverDeferredDeepLink(raw);
             }
             catch (RevnixException err)
             {
                 _bgFailures += 1;
                 Diagnostic("registerInstall", err.Message);
+            }
+        }
+
+        /// <summary>Reports the raw Android Play Install Referrer string
+        /// (e.g. <c>utm_source=instagram&amp;utm_medium=cpc</c>), read by the
+        /// caller via the Play Install Referrer library. <paramref name="platform"/>
+        /// and <paramref name="appVersion"/> mirror <see cref="RegisterInstall"/> —
+        /// pass them here too, since whichever of the two calls reaches the
+        /// server first is the one that creates the install row, and the
+        /// other's fields are discarded as a duplicate. Call from the main
+        /// thread, like the rest of the SDK. Safe to call late or twice;
+        /// fire-and-forget, never throws.</summary>
+        public async Task HandleInstallReferrer(string referrer, string platform = null, string appVersion = null)
+        {
+            if (string.IsNullOrWhiteSpace(referrer)) return;
+            var cid = CustomerId();
+            var body = new Dictionary<string, object>
+            {
+                ["customerId"] = cid,
+                ["occurredAt"] = _config.Now(),
+                ["sdkVersion"] = SdkVersion,
+                ["installReferrer"] = referrer.Length > 1024 ? referrer.Substring(0, 1024) : referrer,
+            };
+            if (platform != null) body["platform"] = platform;
+            if (appVersion != null) body["appVersion"] = appVersion;
+            try
+            {
+                var raw = await Request("POST", new[] { "v1", "installs" }, body);
+                DeliverDeferredDeepLink(raw);
+            }
+            catch (Exception err)
+            {
+                _bgFailures += 1;
+                Diagnostic("handleInstallReferrer", err.Message);
+            }
+        }
+
+        private void DeliverDeferredDeepLink(string raw)
+        {
+            try
+            {
+                var handler = _config.OnDeferredDeepLink;
+                if (handler == null) return;
+                var map = RevnixJson.ParseObject(raw);
+                var dlMap = RevnixJson.GetObject(map, "deferredDeepLink");
+                if (dlMap == null) return;
+                var url = RevnixJson.GetString(dlMap, "url");
+                if (string.IsNullOrEmpty(url)) return;
+                DeferredDeepLinkMatch match;
+                switch (RevnixJson.GetString(dlMap, "match"))
+                {
+                    case "exact": match = DeferredDeepLinkMatch.Exact; break;
+                    case "probabilistic": match = DeferredDeepLinkMatch.Probabilistic; break;
+                    default: return;
+                }
+                lock (_lock)
+                {
+                    if (_config.Storage.Get(KeyDeferredDeepLinkDelivered) != null) return;
+                    _config.Storage.Set(KeyDeferredDeepLinkDelivered, "1");
+                }
+                handler(url, match);
+            }
+            catch (Exception err)
+            {
+                Diagnostic("deferredDeepLink", err.Message);
             }
         }
 

@@ -544,6 +544,15 @@ namespace Revnix
         }
     }
 
+    /// <summary>How a deferred deep link was resolved. <c>Exact</c> comes
+    /// from the Android Play Install Referrer; <c>Probabilistic</c> is a
+    /// best-effort match on iOS.</summary>
+    public enum DeferredDeepLinkMatch
+    {
+        Exact,
+        Probabilistic,
+    }
+
     /// <summary>Swallowed background failure (queue drains, telemetry beacons).</summary>
     public sealed class RevnixDiagnostic
     {

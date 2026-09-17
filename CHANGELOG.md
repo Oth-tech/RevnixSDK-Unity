@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **`GetLastDeepLink()`.** `RevnixSdk.Client.GetLastDeepLink()` returns the most
+  recent link seen by `HandleDeepLink` or a delivered deferred deep link, as
+  `LastDeepLink(Url, ReceivedAt)` or null, persisted on the device so it can
+  be read again after login or onboarding.
 - **Deep links always record their attribution.** `HandleDeepLink` reports
   every ordinary link, so its `link.*` attributes land on the customer with
   no `OnImplicitPaywall` handler and no `deeplink_open` placement. A paywall

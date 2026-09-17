@@ -553,6 +553,21 @@ namespace Revnix
         Probabilistic,
     }
 
+    /// <summary>The most recently seen deep link, persisted so a game can ask
+    /// for it again after login/onboarding swallowed the original delivery.
+    /// See <see cref="RevnixClient.GetLastDeepLink"/>.</summary>
+    public sealed class LastDeepLink
+    {
+        public readonly string Url;
+        public readonly long ReceivedAt;
+
+        public LastDeepLink(string url, long receivedAt)
+        {
+            Url = url;
+            ReceivedAt = receivedAt;
+        }
+    }
+
     /// <summary>Swallowed background failure (queue drains, telemetry beacons).</summary>
     public sealed class RevnixDiagnostic
     {

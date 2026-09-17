@@ -37,6 +37,7 @@ namespace Revnix
         private const string KeyCacheIndex = "revnix.entIndex";
         private const string KeyInstalledAt = "revnix.installedAt";
         private const string KeyDeferredDeepLinkDelivered = "revnix.deferredDeepLinkDelivered";
+        private const string KeyLastDeepLink = "revnix.lastDeepLink";
 
         private readonly RevnixConfig _config;
         private readonly object _lock = new object();
@@ -206,6 +207,7 @@ namespace Revnix
                 await PresentPreview(previewMatch.Groups[1].Value);
                 return;
             }
+            StoreLastDeepLink(url);
             var extra = new Dictionary<string, object>
             {
                 ["url"] = url.Length > 1024 ? url.Substring(0, 1024) : url,
@@ -248,6 +250,44 @@ namespace Revnix
             {
                 Diagnostic("resolveDeepLink", ex.Message);
                 return url;
+            }
+        }
+
+        /// <summary>The most recently seen deep link (an ordinary
+        /// <see cref="HandleDeepLink"/> URL or a delivered deferred deep
+        /// link), persisted across launches — null when nothing has been
+        /// recorded yet, or the stored value is malformed. Never throws.</summary>
+        public LastDeepLink GetLastDeepLink()
+        {
+            try
+            {
+                var raw = _config.Storage.Get(KeyLastDeepLink);
+                if (raw == null) return null;
+                var map = RevnixJson.ParseObject(raw);
+                var url = RevnixJson.GetString(map, "url");
+                if (string.IsNullOrEmpty(url)) return null;
+                return new LastDeepLink(url, RevnixJson.GetLong(map, "receivedAt"));
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        private void StoreLastDeepLink(string url)
+        {
+            try
+            {
+                var map = new Dictionary<string, object>
+                {
+                    ["url"] = url,
+                    ["receivedAt"] = _config.Now(),
+                };
+                _config.Storage.Set(KeyLastDeepLink, RevnixJson.Serialize(map));
+            }
+            catch (Exception err)
+            {
+                Diagnostic("lastDeepLink", err.Message);
             }
         }
 
@@ -877,6 +917,7 @@ namespace Revnix
                     if (_config.Storage.Get(KeyDeferredDeepLinkDelivered) != null) return;
                     _config.Storage.Set(KeyDeferredDeepLinkDelivered, "1");
                 }
+                StoreLastDeepLink(url);
                 handler(url, match);
             }
             catch (Exception err)

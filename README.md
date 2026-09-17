@@ -233,6 +233,20 @@ Failure returns the input unchanged rather than throwing, so the result can
 still be an http(s) URL if the chain could not be unwrapped; check its
 scheme before routing.
 
+### Getting the last deep link later
+
+`HandleDeepLink` and a delivered deferred deep link both persist the URL, so
+a game that swallowed the original delivery (e.g. behind login or
+onboarding) can ask for it again at any point:
+
+```csharp
+var last = RevnixSdk.Client.GetLastDeepLink();
+if (last != null) OpenUrl(last.Url);
+```
+
+Returns null when nothing has been recorded yet. Survives relaunch, and is
+not cleared by `Logout`.
+
 ## Targeting an A/B audience
 
 An experiment can be narrowed to an audience: conditions over customer

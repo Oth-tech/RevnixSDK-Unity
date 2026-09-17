@@ -214,5 +214,81 @@ namespace Revnix.Tests
 
             Assert.IsNull(storage.Get("revnix.deferredDeepLinkDelivered"));
         }
+
+        [Test]
+        public void GetLastDeepLinkIsNullBeforeAnyLink()
+        {
+            var client = MakeClient(new FakeHttp(), out _);
+
+            Assert.IsNull(client.GetLastDeepLink());
+        }
+
+        [Test]
+        public void HandleDeepLinkStoresTheUrlAndReceivedAt()
+        {
+            var client = MakeClient(new FakeHttp(), out _);
+
+            client.HandleDeepLink("com.voigu.app://promo?utm_source=email").GetAwaiter().GetResult();
+
+            var last = client.GetLastDeepLink();
+            Assert.IsNotNull(last);
+            Assert.AreEqual("com.voigu.app://promo?utm_source=email", last.Url);
+            Assert.Greater(last.ReceivedAt, 0);
+        }
+
+        [Test]
+        public void ALaterLinkOverwritesTheEarlierOne()
+        {
+            var client = MakeClient(new FakeHttp(), out _);
+
+            client.HandleDeepLink("com.voigu.app://a").GetAwaiter().GetResult();
+            client.HandleDeepLink("com.voigu.app://b").GetAwaiter().GetResult();
+
+            Assert.AreEqual("com.voigu.app://b", client.GetLastDeepLink().Url);
+        }
+
+        [Test]
+        public void APreviewLinkIsNotStored()
+        {
+            var client = MakeClient(new FakeHttp(), out _);
+
+            client.HandleDeepLink(
+                "com.voigu.app://revnix-preview?revnix_preview=" + new string('a', 64))
+                .GetAwaiter().GetResult();
+
+            Assert.IsNull(client.GetLastDeepLink());
+        }
+
+        [Test]
+        public void ADeliveredDeferredDeepLinkIsStored()
+        {
+            var http = new FakeHttp
+            {
+                InstallsResponseBody =
+                    "{\"deferredDeepLink\":{\"url\":\"https://x.app/promo\",\"match\":\"exact\"}}",
+            };
+            var client = MakeClient(http, out _);
+
+            client.HandleInstallReferrer("utm_source=instagram").GetAwaiter().GetResult();
+
+            Assert.AreEqual("https://x.app/promo", client.GetLastDeepLink().Url);
+        }
+
+        [Test]
+        public void AMalformedStoredValueAnswersNull()
+        {
+            var storage = new MemoryStorage();
+            storage.Set("revnix.lastDeepLink", "{not json");
+            var config = new RevnixConfig
+            {
+                ApiKey = "rvx_pk_test",
+                BaseUrl = "https://x",
+                Http = new FakeHttp(),
+                Storage = storage,
+            };
+            var client = new RevnixClient(config);
+
+            Assert.IsNull(client.GetLastDeepLink());
+        }
     }
 }

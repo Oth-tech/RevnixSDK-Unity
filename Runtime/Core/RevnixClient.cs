@@ -215,6 +215,42 @@ namespace Revnix
             await FireImplicit(RevnixImplicitPlacement.DeeplinkOpen, extra, present);
         }
 
+        /// <summary>
+        /// Unwraps a link an email service provider (Mailchimp, SendGrid…)
+        /// rewrote through its own click-tracking domain — e.g.
+        /// <c>https://click.mailchimp.com/track/abc</c> back to
+        /// <c>com.voigu.app://promo?utm_source=email&amp;utm_campaign=summer50</c>.
+        /// Route the result yourself and hand it to <see cref="HandleDeepLink"/>;
+        /// the result may still be an http(s) URL if the chain could not be
+        /// unwrapped, so check its scheme before routing. A null, empty, or
+        /// whitespace URL, a URL over 1024 characters, a URL that is not
+        /// http(s), or any failure, returns the input unchanged instead of
+        /// throwing.
+        /// </summary>
+        public async Task<string> ResolveDeepLink(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return url;
+            if (url.Length > 1024) return url;
+            if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                return url;
+            }
+            try
+            {
+                var raw = await Request("GET", new[] { "v1", "links", "resolve" },
+                    query: new Dictionary<string, string> { ["url"] = url });
+                var map = RevnixJson.ParseObject(raw);
+                var resolved = RevnixJson.GetString(map, "url", null);
+                return string.IsNullOrEmpty(resolved) ? url : resolved;
+            }
+            catch (Exception ex)
+            {
+                Diagnostic("resolveDeepLink", ex.Message);
+                return url;
+            }
+        }
+
         private async Task PresentPreview(string token)
         {
             try

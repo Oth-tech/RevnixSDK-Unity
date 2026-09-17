@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace Revnix.Unity
@@ -110,6 +111,15 @@ namespace Revnix.Unity
                 platform: UnityDeviceFacts.PlatformName(Application.platform),
                 appVersion: Application.version);
         }
+
+        /// <summary>Unwraps a link an email service provider (Mailchimp,
+        /// SendGrid…) rewrote through its own click-tracking domain. Route the
+        /// result yourself and hand it to <see cref="RevnixClient.HandleDeepLink"/>;
+        /// the result may still be an http(s) URL if the chain could not be
+        /// unwrapped, so check its scheme before routing. A null, empty, or
+        /// whitespace URL, or any failure, returns the input unchanged instead
+        /// of throwing.</summary>
+        public static Task<string> ResolveDeepLink(string url) => Client.ResolveDeepLink(url);
 
         private static async void RunLaunchChores(RevnixClient client)
         {

@@ -20,6 +20,13 @@
   continuation, same as `onImplicitPaywall`). `RegisterInstall` now reports
   the install platform (`"ios"`/`"android"`) automatically. (REV-299)
 
+- **`ResolveDeepLink`.** `RevnixSdk.ResolveDeepLink(url)` /
+  `RevnixClient.ResolveDeepLink(url)` unwraps a link an email service
+  provider (Mailchimp, SendGrid…) rewrote through its own click-tracking
+  domain, returning the underlying deep link so it can be routed and handed
+  to `HandleDeepLink`. A null, empty, or whitespace URL, or any failure,
+  returns the input unchanged.
+
 - **Dashboard QR/link paywall preview.** `HandleDeepLink` now recognises
   `<scheme>://revnix-preview?revnix_preview=<token>`, fetches the draft
   paywall from `GET /v1/paywalls/preview/{token}` and hands it to

@@ -218,6 +218,21 @@ there; iOS has no referrer to read, so it relies on `RegisterInstall`'s
 probabilistic match alone. Route the URL yourself; optionally also pass it to
 `HandleDeepLink` for `deeplink_open` paywall rules.
 
+An email link is often wrapped by the sender's click-tracking domain, e.g.
+`https://click.mailchimp.com/track/abc` instead of
+`com.voigu.app://promo?utm_source=email&utm_campaign=summer50`. Unwrap it
+first with `RevnixSdk.ResolveDeepLink(url)`, then route the result yourself
+and pass it to `HandleDeepLink`:
+
+```csharp
+var resolved = await RevnixSdk.ResolveDeepLink(wrappedUrl);
+await RevnixSdk.Client.HandleDeepLink(resolved);
+```
+
+Failure returns the input unchanged rather than throwing, so the result can
+still be an http(s) URL if the chain could not be unwrapped; check its
+scheme before routing.
+
 ## Targeting an A/B audience
 
 An experiment can be narrowed to an audience: conditions over customer

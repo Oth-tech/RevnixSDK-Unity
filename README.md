@@ -174,7 +174,7 @@ Application.deepLinkActivated += url => _ = RevnixSdk.Client.HandleDeepLink(url)
 `deepLinkActivated` fires for links that arrive while it runs. Run both
 once per launch, where `Configure` runs — `absoluteURL` keeps the latest
 link for the life of the process, so reading it again on a later scene
-load would count the same open twice. From the release after v0.2.0,
+load would count the same open twice. From v0.3.0,
 `HandleDeepLink` also ignores a null or empty URL itself.
 
 Set `PlacementKey = trigger.Resolution.PlacementKey` on the paywall options —

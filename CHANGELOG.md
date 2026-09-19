@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0
+
 - **`GetLastDeepLink()`.** `RevnixSdk.Client.GetLastDeepLink()` returns the most
   recent link seen by `HandleDeepLink` or a delivered deferred deep link, as
   `LastDeepLink(Url, ReceivedAt)` or null, persisted on the device so it can

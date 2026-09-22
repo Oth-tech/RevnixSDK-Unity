@@ -112,6 +112,23 @@ namespace Revnix.Unity
                 appVersion: Application.version);
         }
 
+        /// <summary>AT9: hand over the Apple AdServices attribution token,
+        /// minted yourself via your own native iOS plugin — this package
+        /// ships no <c>ios/</c> layer, so there is nothing here to call
+        /// <c>AAAttribution</c> from. Fills platform/appVersion the same way
+        /// <see cref="HandleInstallReferrer"/> does. Fire-and-forget; if you
+        /// need the server's <c>appleAttribution</c> verdict to decide
+        /// whether to retry a <c>"pending"</c> token, call
+        /// <see cref="RevnixClient.HandleAttributionToken"/> on <see cref="Client"/>
+        /// directly instead.</summary>
+        public static void HandleAttributionToken(string attributionToken)
+        {
+            _ = Client.HandleAttributionToken(
+                attributionToken,
+                platform: UnityDeviceFacts.PlatformName(Application.platform),
+                appVersion: Application.version);
+        }
+
         /// <summary>Unwraps a link an email service provider (Mailchimp,
         /// SendGrid…) rewrote through its own click-tracking domain. Route the
         /// result yourself and hand it to <see cref="RevnixClient.HandleDeepLink"/>;

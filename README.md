@@ -222,6 +222,25 @@ relies on `RegisterInstall`'s probabilistic match alone. Route the URL
 yourself; optionally also pass it to `HandleDeepLink` for `deeplink_open`
 paywall rules.
 
+### Apple Search Ads attribution
+
+iOS only. Like the Play Install Referrer above, reading this is manual here —
+this package ships no `ios/` native layer, so there is nothing here to call
+Apple's `AAAttribution` from. Mint the token yourself in your own native iOS
+plugin and hand it over:
+
+```csharp
+RevnixSdk.HandleAttributionToken(token);
+```
+
+The server resolves it to which Apple Search Ads campaign, if any, drove the
+install. `"resolved"` (a campaign was named) and `"organic"` (Apple answered,
+not an ASA install) are final; `"pending"` means Apple couldn't yet answer — a
+freshly minted token is unregistered on Apple's side for a few seconds — and
+is worth retrying with a fresh token on the next cold start. The facade call
+is fire-and-forget; call `RevnixSdk.Client.HandleAttributionToken(token)`
+directly if you need that verdict to decide whether to retry.
+
 An email link is often wrapped by the sender's click-tracking domain, e.g.
 `https://click.mailchimp.com/track/abc` instead of
 `com.voigu.app://promo?utm_source=email&utm_campaign=summer50`. Unwrap it

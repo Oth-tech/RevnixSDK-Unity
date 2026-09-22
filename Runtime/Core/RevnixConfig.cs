@@ -123,8 +123,9 @@ namespace Revnix
         /// however you route <see cref="RevnixClient.HandleDeepLink"/>. Left
         /// null, the SDK does nothing with the link and does not mark it
         /// delivered — set it before the app ever calls
-        /// <see cref="RevnixClient.RegisterInstall"/> or
-        /// <see cref="RevnixClient.HandleInstallReferrer"/>.</summary>
+        /// <see cref="RevnixClient.RegisterInstall"/>,
+        /// <see cref="RevnixClient.HandleInstallReferrer"/>, or
+        /// <see cref="RevnixClient.HandleAttributionToken"/>.</summary>
         public Action<string, DeferredDeepLinkMatch> OnDeferredDeepLink;
     }
 }

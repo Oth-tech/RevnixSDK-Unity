@@ -894,6 +894,50 @@ namespace Revnix
             }
         }
 
+        /// <summary>Reports the Apple AdServices attribution token (minted by
+        /// the caller's own native iOS plugin — this package ships no
+        /// <c>ios/</c> layer, so there is nothing here to call
+        /// <c>AAAttribution</c> from) so the server can resolve which Apple
+        /// Search Ads campaign, if any, drove the install. <paramref
+        /// name="platform"/> and <paramref name="appVersion"/> mirror
+        /// <see cref="RegisterInstall"/>, same reasoning as
+        /// <see cref="HandleInstallReferrer"/>. Returns the server's
+        /// <c>appleAttribution</c> verdict: <c>"resolved"</c> (a campaign was
+        /// named) or <c>"organic"</c> (Apple answered, not an ASA install) are
+        /// final; <c>"pending"</c> means Apple could not yet answer — a
+        /// freshly minted token is unregistered on Apple's side for a few
+        /// seconds — and is worth retrying with a fresh token on the next
+        /// cold start, the way the native iOS SDK retries internally. Returns
+        /// null on a blank token or a failed request. Call from the main
+        /// thread, like the rest of the SDK. Safe to call late or twice;
+        /// fire-and-forget, never throws.</summary>
+        public async Task<string> HandleAttributionToken(string attributionToken, string platform = null, string appVersion = null)
+        {
+            if (string.IsNullOrWhiteSpace(attributionToken)) return null;
+            var cid = CustomerId();
+            var body = new Dictionary<string, object>
+            {
+                ["customerId"] = cid,
+                ["occurredAt"] = _config.Now(),
+                ["sdkVersion"] = SdkVersion,
+                ["attributionToken"] = attributionToken.Length > 2048 ? attributionToken.Substring(0, 2048) : attributionToken,
+            };
+            if (platform != null) body["platform"] = platform;
+            if (appVersion != null) body["appVersion"] = appVersion;
+            try
+            {
+                var raw = await Request("POST", new[] { "v1", "installs" }, body);
+                DeliverDeferredDeepLink(raw);
+                return RevnixJson.GetString(RevnixJson.ParseObject(raw), "appleAttribution");
+            }
+            catch (Exception err)
+            {
+                _bgFailures += 1;
+                Diagnostic("handleAttributionToken", err.Message);
+                return null;
+            }
+        }
+
         private void DeliverDeferredDeepLink(string raw)
         {
             try

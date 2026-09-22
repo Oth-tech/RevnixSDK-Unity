@@ -209,14 +209,18 @@ match — a same-network click within the last hour, so it can be wrong on a
 shared network. It never carries an install referrer, so it can never answer
 `exact`.
 
-`exact` only ever comes from Android's Play Install Referrer, and only once
-your game reads it and hands the raw string to
-`RevnixSdk.HandleInstallReferrer(referrer)`, which reports it to the
-server and delivers to the same `onDeferredDeepLink` handler. Skip this call
-on Android and no deferred link — exact or probabilistic — ever arrives
-there; iOS has no referrer to read, so it relies on `RegisterInstall`'s
-probabilistic match alone. Route the URL yourself; optionally also pass it to
-`HandleDeepLink` for `deeplink_open` paywall rules.
+`exact` only ever comes from Android's Play Install Referrer, and reading it
+is still manual here — unlike the Flutter and Capacitor SDKs, which read it
+for you, a Unity game must add
+`implementation 'com.android.installreferrer:installreferrer:2.2'` to its own
+`Assets/Plugins/Android/mainTemplate.gradle`, read the referrer itself, and
+hand the raw string to `RevnixSdk.HandleInstallReferrer(referrer)`, which
+reports it to the server and delivers to the same `onDeferredDeepLink`
+handler. Skip this call on Android and no deferred link — exact or
+probabilistic — ever arrives there; iOS has no referrer to read, so it
+relies on `RegisterInstall`'s probabilistic match alone. Route the URL
+yourself; optionally also pass it to `HandleDeepLink` for `deeplink_open`
+paywall rules.
 
 An email link is often wrapped by the sender's click-tracking domain, e.g.
 `https://click.mailchimp.com/track/abc` instead of

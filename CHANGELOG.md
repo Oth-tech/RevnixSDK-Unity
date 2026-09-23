@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **`GetAttribution()` / `onAttribution`.** `RevnixSdk.Client.GetAttribution()`
+  returns the install-attribution verdict — `RevnixAttribution(InstallMatch,
+  AttributedAt, ReattributedAt, LinkToken, ReferrerSource, MatchSignals,
+  Source, Medium, Campaign, Term, Content)` — or null when no install has
+  been attributed yet or the read failed; it never throws.
+  `RevnixSdk.Configure(onAttribution:)` / `RevnixConfig.OnAttribution`
+  delivers the verdict whenever it CHANGES, from a background continuation
+  like `onDeferredDeepLink`, and is also what makes the SDK refresh it by
+  itself after `RegisterInstall`, `HandleInstallReferrer` and
+  `HandleAttributionToken`. (AT11)
+
 ## 0.3.0
 
 - **`GetLastDeepLink()`.** `RevnixSdk.Client.GetLastDeepLink()` returns the most

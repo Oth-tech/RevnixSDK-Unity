@@ -568,6 +568,86 @@ namespace Revnix
         }
     }
 
+    /// <summary>AT11: the install-attribution verdict for this customer —
+    /// which signal the install was matched on, and the campaign facts that
+    /// came with it. See <see cref="RevnixClient.GetAttribution"/> and
+    /// <see cref="RevnixConfig.OnAttribution"/>. Optional fields are null
+    /// (or 0 for <see cref="ReattributedAt"/>) when the server omitted
+    /// them.</summary>
+    public sealed class RevnixAttribution
+    {
+        /// <summary>One of <c>"referrer"</c>, <c>"click"</c>,
+        /// <c>"impression"</c>, <c>"organic"</c>. The server's
+        /// <c>"unknown"</c> — no install recorded yet — never reaches a host:
+        /// it surfaces as a null verdict instead.</summary>
+        public string InstallMatch;
+
+        /// <summary>Unix ms.</summary>
+        public long AttributedAt;
+
+        /// <summary>Unix ms, 0 when the customer was never re-attributed.</summary>
+        public long ReattributedAt;
+
+        public string LinkToken;
+        public string ReferrerSource;
+
+        /// <summary>Which probabilistic signals agreed, when the match was a
+        /// probabilistic one. Null when the server sent none.</summary>
+        public List<string> MatchSignals;
+
+        public string Source;
+        public string Medium;
+        public string Campaign;
+        public string Term;
+        public string Content;
+
+        public static RevnixAttribution FromJson(Dictionary<string, object> map)
+        {
+            var attribution = new RevnixAttribution
+            {
+                InstallMatch = RevnixJson.GetString(map, "installMatch"),
+                AttributedAt = RevnixJson.GetLong(map, "attributedAt"),
+                ReattributedAt = RevnixJson.GetLong(map, "reattributedAt"),
+                LinkToken = RevnixJson.GetString(map, "linkToken"),
+                ReferrerSource = RevnixJson.GetString(map, "referrerSource"),
+                Source = RevnixJson.GetString(map, "source"),
+                Medium = RevnixJson.GetString(map, "medium"),
+                Campaign = RevnixJson.GetString(map, "campaign"),
+                Term = RevnixJson.GetString(map, "term"),
+                Content = RevnixJson.GetString(map, "content"),
+            };
+            var signals = RevnixJson.GetList(map, "matchSignals");
+            if (signals.Count > 0)
+            {
+                attribution.MatchSignals = new List<string>();
+                foreach (var signal in signals)
+                {
+                    if (signal is string text) attribution.MatchSignals.Add(text);
+                }
+            }
+            return attribution;
+        }
+
+        internal string ToJson()
+        {
+            var map = new Dictionary<string, object>
+            {
+                ["installMatch"] = InstallMatch,
+                ["attributedAt"] = AttributedAt,
+            };
+            if (ReattributedAt != 0) map["reattributedAt"] = ReattributedAt;
+            if (LinkToken != null) map["linkToken"] = LinkToken;
+            if (ReferrerSource != null) map["referrerSource"] = ReferrerSource;
+            if (MatchSignals != null) map["matchSignals"] = MatchSignals.ConvertAll(s => (object)s);
+            if (Source != null) map["source"] = Source;
+            if (Medium != null) map["medium"] = Medium;
+            if (Campaign != null) map["campaign"] = Campaign;
+            if (Term != null) map["term"] = Term;
+            if (Content != null) map["content"] = Content;
+            return RevnixJson.Serialize(map);
+        }
+    }
+
     /// <summary>Swallowed background failure (queue drains, telemetry beacons).</summary>
     public sealed class RevnixDiagnostic
     {

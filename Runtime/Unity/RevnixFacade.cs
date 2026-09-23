@@ -43,7 +43,8 @@ namespace Revnix.Unity
             string baseUrl,
             Action<RevnixDiagnostic> onDiagnostic = null,
             Action<RevnixImplicitTrigger> onImplicitPaywall = null,
-            Action<string, DeferredDeepLinkMatch> onDeferredDeepLink = null)
+            Action<string, DeferredDeepLinkMatch> onDeferredDeepLink = null,
+            Action<RevnixAttribution> onAttribution = null)
         {
             var config = new RevnixConfig
             {
@@ -57,6 +58,7 @@ namespace Revnix.Unity
                 // on — see RevnixConfig.OnImplicitPaywall.
                 OnImplicitPaywall = onImplicitPaywall,
                 OnDeferredDeepLink = onDeferredDeepLink,
+                OnAttribution = onAttribution,
             };
             return Configure(config);
         }

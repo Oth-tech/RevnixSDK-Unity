@@ -38,6 +38,7 @@ namespace Revnix
         private const string KeyInstalledAt = "revnix.installedAt";
         private const string KeyDeferredDeepLinkDelivered = "revnix.deferredDeepLinkDelivered";
         private const string KeyLastDeepLink = "revnix.lastDeepLink";
+        private const string KeyAttribution = "revnix.attribution";
 
         private readonly RevnixConfig _config;
         private readonly object _lock = new object();
@@ -271,6 +272,75 @@ namespace Revnix
             catch (Exception)
             {
                 return null;
+            }
+        }
+
+        /// <summary>AT11: the install-attribution verdict for this customer
+        /// — which signal the install was matched on, and the campaign facts
+        /// that came with it. Null when none has been recorded yet (a normal
+        /// cold-start race: the install report and this read can cross) or
+        /// when the read fails. Fetches fresh on every call rather than
+        /// caching in memory. A CHANGED answer also reaches
+        /// <see cref="RevnixConfig.OnAttribution"/>, so a game that only
+        /// wants updates need not call this at all. Never throws.</summary>
+        public async Task<RevnixAttribution> GetAttribution()
+        {
+            try
+            {
+                var raw = await Request("GET",
+                    new[] { "v1", "customers", CustomerId(), "attribution" });
+                var verdict = RevnixAttribution.FromJson(RevnixJson.ParseObject(raw));
+                if (string.IsNullOrEmpty(verdict.InstallMatch) || verdict.InstallMatch == "unknown")
+                {
+                    return null;
+                }
+                DeliverAttribution(verdict);
+                return verdict;
+            }
+            catch (Exception err)
+            {
+                _bgFailures += 1;
+                Diagnostic("getAttribution", err.Message);
+                return null;
+            }
+        }
+
+        private void RefreshAttribution()
+        {
+            if (_config.OnAttribution == null) return;
+            _ = GetAttribution();
+        }
+
+        private void DeliverAttribution(RevnixAttribution attribution)
+        {
+            var serialized = attribution.ToJson();
+            string cached = null;
+            try
+            {
+                cached = _config.Storage.Get(KeyAttribution);
+            }
+            catch (Exception err)
+            {
+                Diagnostic("onAttribution", err.Message);
+            }
+            if (cached == serialized) return;
+            try
+            {
+                _config.Storage.Set(KeyAttribution, serialized);
+            }
+            catch (Exception err)
+            {
+                Diagnostic("onAttribution", err.Message);
+            }
+            var handler = _config.OnAttribution;
+            if (handler == null) return;
+            try
+            {
+                handler(attribution);
+            }
+            catch (Exception err)
+            {
+                Diagnostic("onAttribution", err.Message);
             }
         }
 
@@ -851,6 +921,7 @@ namespace Revnix
             {
                 var raw = await Request("POST", new[] { "v1", "installs" }, body);
                 _config.Storage.Set(InstallReportedKey(cid), "1");
+                RefreshAttribution();
                 DeliverDeferredDeepLink(raw);
             }
             catch (RevnixException err)
@@ -885,6 +956,7 @@ namespace Revnix
             try
             {
                 var raw = await Request("POST", new[] { "v1", "installs" }, body);
+                RefreshAttribution();
                 DeliverDeferredDeepLink(raw);
             }
             catch (Exception err)
@@ -927,6 +999,7 @@ namespace Revnix
             try
             {
                 var raw = await Request("POST", new[] { "v1", "installs" }, body);
+                RefreshAttribution();
                 DeliverDeferredDeepLink(raw);
                 return RevnixJson.GetString(RevnixJson.ParseObject(raw), "appleAttribution");
             }

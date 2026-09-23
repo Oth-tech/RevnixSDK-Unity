@@ -127,5 +127,22 @@ namespace Revnix
         /// <see cref="RevnixClient.HandleInstallReferrer"/>, or
         /// <see cref="RevnixClient.HandleAttributionToken"/>.</summary>
         public Action<string, DeferredDeepLinkMatch> OnDeferredDeepLink;
+
+        /// <summary>AT11: called with the install-attribution verdict
+        /// whenever it CHANGES — once when the install is first attributed,
+        /// again if the customer is later re-attributed, and never twice for
+        /// the same verdict (the last one delivered is remembered across
+        /// launches). Fires from a background continuation like
+        /// <see cref="OnDeferredDeepLink"/>, so hop to the main thread before
+        /// touching the scene.
+        ///
+        /// Setting this handler is also what makes the SDK ASK: with it null
+        /// the verdict is only fetched when the app calls
+        /// <see cref="RevnixClient.GetAttribution"/> itself. Set it before
+        /// the app calls <see cref="RevnixClient.RegisterInstall"/>,
+        /// <see cref="RevnixClient.HandleInstallReferrer"/>, or
+        /// <see cref="RevnixClient.HandleAttributionToken"/>, since those are
+        /// the moments a fresh verdict becomes available.</summary>
+        public Action<RevnixAttribution> OnAttribution;
     }
 }

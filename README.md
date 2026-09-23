@@ -270,6 +270,31 @@ if (last != null) OpenUrl(last.Url);
 Returns null when nothing has been recorded yet. Survives relaunch, and is
 not cleared by `Logout`.
 
+### The install-attribution verdict
+
+Which signal the install was matched on — and the campaign facts that came
+with it. Pass `onAttribution` to `Configure` to be told whenever the verdict
+changes (once when the install is first attributed, again on a
+re-attribution, never twice for the same verdict), or ask for it yourself:
+
+```csharp
+RevnixSdk.Configure("rvx_pk_live_…", "https://….convex.site",
+    onAttribution: a => mainThread.Post(_ => Log(a.InstallMatch, a.Campaign), null));
+
+var attribution = await RevnixSdk.Client.GetAttribution();
+if (attribution != null) Log(attribution.InstallMatch, attribution.Campaign);
+```
+
+`InstallMatch` is `"referrer"`, `"click"`, `"impression"` or `"organic"`;
+`AttributedAt` and `ReattributedAt` are unix ms (`ReattributedAt` is 0 when
+the customer was never re-attributed), and `LinkToken`, `ReferrerSource`,
+`MatchSignals`, `Source`, `Medium`, `Campaign`, `Term` and `Content` are null
+when the server sent none. `GetAttribution` returns null when no install has
+been attributed yet — a cold start can ask before its own install report
+lands — and on any failure; it never throws. The SDK only asks for the
+verdict on its own (after the install, install-referrer and Apple Search Ads
+reports) when `onAttribution` is set.
+
 ## Targeting an A/B audience
 
 An experiment can be narrowed to an audience: conditions over customer

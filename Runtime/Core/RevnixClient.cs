@@ -39,6 +39,8 @@ namespace Revnix
         private const string KeyDeferredDeepLinkDelivered = "revnix.deferredDeepLinkDelivered";
         private const string KeyLastDeepLink = "revnix.lastDeepLink";
         private const string KeyAttribution = "revnix.attribution";
+        private const string KeySessionStartedAt = "revnix.sessionStartedAt";
+        private const string KeyLastBackgroundAt = "revnix.lastBackgroundAt";
 
         private readonly RevnixConfig _config;
         private readonly object _lock = new object();
@@ -151,19 +153,22 @@ namespace Revnix
             if (_mintedThisLaunch) moments.Add(RevnixImplicitPlacement.AppInstall);
             moments.Add(RevnixImplicitPlacement.AppLaunch);
             moments.Add(RevnixImplicitPlacement.SessionStart);
+            var sessionExtra = BeginSession(_config.Now());
 
-            var batch = RunLaunchBatch(moments);
+            var batch = RunLaunchBatch(moments, sessionExtra);
             _launchBatch = batch;
             await batch;
             _launchBatch = null;
         }
 
-        private async Task<bool> RunLaunchBatch(List<RevnixImplicitPlacement> moments)
+        private async Task<bool> RunLaunchBatch(
+            List<RevnixImplicitPlacement> moments, Dictionary<string, object> sessionExtra)
         {
             var presented = false;
             foreach (var placement in moments)
             {
-                var shown = await FireImplicit(placement, null, !presented);
+                var extra = placement == RevnixImplicitPlacement.SessionStart ? sessionExtra : null;
+                var shown = await FireImplicit(placement, extra, !presented);
                 presented = presented || shown;
             }
             return presented;
@@ -396,7 +401,13 @@ namespace Revnix
                     // First report wins: a platform that repeats "background"
                     // (pause AND focus-loss both firing) must not keep resetting
                     // the clock forward.
-                    if (_lastBackgroundAt == null) _lastBackgroundAt = _config.Now();
+                    if (_lastBackgroundAt == null)
+                    {
+                        _lastBackgroundAt = _config.Now();
+                        _config.Storage.Set(
+                            KeyLastBackgroundAt,
+                            _lastBackgroundAt.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    }
                     return;
                 }
                 // A foreground with no background before it is the launch
@@ -413,7 +424,8 @@ namespace Revnix
                     // otherwise keep firing a moment the operator turned off —
                     // or never fire one they turned on — until the next launch.
                     lock (_lock) { _implicitConfig = null; }
-                    await FireImplicit(RevnixImplicitPlacement.SessionStart);
+                    var extra = BeginSession(_config.Now());
+                    await FireImplicit(RevnixImplicitPlacement.SessionStart, extra);
                 }
             }
             catch (Exception err)
@@ -422,6 +434,24 @@ namespace Revnix
                 // crash rather than a diagnostic.
                 Diagnostic("implicitForeground", err.Message);
             }
+        }
+
+        private Dictionary<string, object> BeginSession(long now)
+        {
+            Dictionary<string, object> extra = null;
+            var startedRaw = _config.Storage.Get(KeySessionStartedAt);
+            var lastBgRaw = _config.Storage.Get(KeyLastBackgroundAt);
+            if (startedRaw != null && lastBgRaw != null &&
+                long.TryParse(startedRaw, out var started) &&
+                long.TryParse(lastBgRaw, out var lastBg) &&
+                lastBg >= started)
+            {
+                extra = new Dictionary<string, object> { ["previousSessionMs"] = lastBg - started };
+            }
+            _config.Storage.Set(
+                KeySessionStartedAt, now.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            _config.Storage.Remove(KeyLastBackgroundAt);
+            return extra;
         }
 
         /// <summary>Which of the six this game has configured. See

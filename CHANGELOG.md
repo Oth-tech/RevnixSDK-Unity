@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **`previousSessionMs` on `session_start`.** Every `session_start` implicit
+  trigger after the first now reports how long the previous session lasted,
+  in milliseconds, so the server can stamp it onto that session's
+  `session.started` event. (AT16)
 - **`GetAttribution()` / `onAttribution`.** `RevnixSdk.Client.GetAttribution()`
   returns the install-attribution verdict — `RevnixAttribution(InstallMatch,
   AttributedAt, ReattributedAt, LinkToken, ReferrerSource, MatchSignals,

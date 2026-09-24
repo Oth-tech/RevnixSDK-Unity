@@ -7,8 +7,10 @@
 // was configured. That makes the key spellings the one thing worth asserting
 // hard, alongside the loop guard's shape.
 
+using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using NUnit.Framework;
 using Revnix;
 
@@ -16,6 +18,43 @@ namespace Revnix.Tests
 {
     public class ImplicitPlacementTests
     {
+        private sealed class FakeLifecycle : IRevnixLifecycle
+        {
+            public Action<RevnixAppState> Handler;
+
+            public Action OnStateChange(Action<RevnixAppState> handler)
+            {
+                Handler = handler;
+                return () => Handler = null;
+            }
+        }
+
+        private sealed class FakeHttp : IRevnixHttp
+        {
+            public readonly List<Dictionary<string, object>> Triggered =
+                new List<Dictionary<string, object>>();
+
+            public Task<RevnixHttpResponse> Send(
+                string method, string url, string jsonBody,
+                IReadOnlyDictionary<string, string> headers, int timeoutMs)
+            {
+                if (url.Contains("/v1/config"))
+                {
+                    return Task.FromResult(new RevnixHttpResponse(
+                        200, "{\"revision\":1,\"implicitPlacements\":[\"session_start\"]}"));
+                }
+                if (url.Contains("/placements/triggered") && jsonBody != null)
+                {
+                    Triggered.Add(RevnixJson.ParseObject(jsonBody));
+                }
+                return Task.FromResult(new RevnixHttpResponse(
+                    200, "{\"paywall\":null,\"skipReason\":\"not_configured\",\"recorded\":false}"));
+            }
+        }
+
+        private static List<Dictionary<string, object>> SessionStarts(FakeHttp http)
+            => http.Triggered.FindAll(b => RevnixJson.GetString(b, "placement") == "session_start");
+
         private static readonly RevnixImplicitPlacement[] All =
         {
             RevnixImplicitPlacement.AppInstall,
@@ -131,6 +170,79 @@ namespace Revnix.Tests
             config.OnImplicitPaywall = null;
             config.ImplicitPlacements = true;
             Assert.IsTrue(config.ImplicitPlacementsEnabled);
+        }
+
+        [Test]
+        public void PreviousSessionMsIsReportedOnTheNextSessionStart()
+        {
+            var http = new FakeHttp();
+            var lifecycle = new FakeLifecycle();
+            var now = 1_700_000_000_000L;
+            var config = new RevnixConfig
+            {
+                ApiKey = "rvx_pk_test",
+                BaseUrl = "https://x",
+                Http = http,
+                Storage = new MemoryStorage(),
+                Lifecycle = lifecycle,
+                Now = () => now,
+                OnImplicitPaywall = _ => { },
+            };
+            var client = new RevnixClient(config);
+
+            client.StartImplicitPlacements().GetAwaiter().GetResult();
+            var coldStart = SessionStarts(http);
+            Assert.AreEqual(1, coldStart.Count);
+            Assert.IsFalse(coldStart[0].ContainsKey("previousSessionMs"));
+
+            now += 10 * 60 * 1000;
+            lifecycle.Handler(RevnixAppState.Background);
+            now += 31 * 60 * 1000;
+            lifecycle.Handler(RevnixAppState.Foreground);
+
+            var afterForeground = SessionStarts(http);
+            Assert.AreEqual(2, afterForeground.Count);
+            Assert.AreEqual(600000L, RevnixJson.GetLong(afterForeground[1], "previousSessionMs"));
+        }
+
+        [Test]
+        public void PreviousSessionMsSurvivesAColdStartAcrossClients()
+        {
+            var storage = new MemoryStorage();
+            var t0 = 1_700_000_000_000L;
+
+            var lifecycleA = new FakeLifecycle();
+            var nowA = t0;
+            var clientA = new RevnixClient(new RevnixConfig
+            {
+                ApiKey = "rvx_pk_test",
+                BaseUrl = "https://x",
+                Http = new FakeHttp(),
+                Storage = storage,
+                Lifecycle = lifecycleA,
+                Now = () => nowA,
+                OnImplicitPaywall = _ => { },
+            });
+            clientA.StartImplicitPlacements().GetAwaiter().GetResult();
+            nowA = t0 + 5 * 60 * 1000;
+            lifecycleA.Handler(RevnixAppState.Background);
+
+            var httpB = new FakeHttp();
+            var nowB = t0 + 2 * 3600 * 1000;
+            var clientB = new RevnixClient(new RevnixConfig
+            {
+                ApiKey = "rvx_pk_test",
+                BaseUrl = "https://x",
+                Http = httpB,
+                Storage = storage,
+                Now = () => nowB,
+                OnImplicitPaywall = _ => { },
+            });
+            clientB.StartImplicitPlacements().GetAwaiter().GetResult();
+
+            var coldStart = SessionStarts(httpB);
+            Assert.AreEqual(1, coldStart.Count);
+            Assert.AreEqual(300000L, RevnixJson.GetLong(coldStart[0], "previousSessionMs"));
         }
     }
 }

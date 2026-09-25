@@ -1236,6 +1236,50 @@ namespace Revnix
             }
         }
 
+        /// <summary>Report impression-level ad revenue from your mediation SDK's paid-event
+        /// callback (AdMob OnPaidEvent, AppLovin MAX OnAdRevenuePaidEvent). Fire-and-forget.</summary>
+        public async Task LogAdRevenue(
+            double revenue,
+            string currency,
+            string network = null,
+            string mediation = null,
+            string adUnit = null,
+            string placement = null,
+            string format = null,
+            string eventId = null)
+        {
+            if (double.IsNaN(revenue) || double.IsInfinity(revenue) || revenue <= 0)
+            {
+                Diagnostic("logAdRevenue", "revenue must be a positive finite number");
+                return;
+            }
+            var body = new Dictionary<string, object>
+            {
+                ["customerId"] = CustomerId(),
+                ["revenue"] = revenue,
+                ["currency"] = currency,
+                ["sdkVersion"] = SdkVersion,
+            };
+            if (network != null) body["network"] = Truncate(network);
+            if (mediation != null) body["mediation"] = Truncate(mediation);
+            if (adUnit != null) body["adUnit"] = Truncate(adUnit);
+            if (placement != null) body["placement"] = Truncate(placement);
+            if (format != null) body["format"] = Truncate(format);
+            if (eventId != null) body["eventId"] = Truncate(eventId);
+            try
+            {
+                await Request("POST", new[] { "v1", "ad-revenue" }, body);
+            }
+            catch (RevnixException err)
+            {
+                _bgFailures += 1;
+                Diagnostic("logAdRevenue", err.Message);
+            }
+        }
+
+        private static string Truncate(string value) =>
+            value.Length > 100 ? value.Substring(0, 100) : value;
+
         // ── Transport ────────────────────────────────────────────────────────
 
         /// <summary>Set attributes on the current customer (REV-033 v2).

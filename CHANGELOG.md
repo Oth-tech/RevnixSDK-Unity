@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`LogAdRevenue`.** `RevnixSdk.Client.LogAdRevenue(revenue, currency, network:,
+  mediation:, adUnit:, placement:, format:, eventId:)` reports impression-level
+  ad revenue from your mediation SDK's paid-event callback (AdMob
+  `OnPaidEvent`, AppLovin MAX `OnAdRevenuePaidEvent`) to `POST /v1/ad-revenue`.
+  Fire-and-forget like the other beacons; a non-finite or non-positive
+  `revenue` is dropped locally rather than sent. (PT8)
 - **`previousSessionMs` on `session_start`.** Every `session_start` implicit
   trigger after the first now reports how long the previous session lasted,
   in milliseconds, so the server can stamp it onto that session's

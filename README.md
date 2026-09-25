@@ -119,9 +119,9 @@ Passing `Client` reports the impression, and with `OnClose` set
 
 | Call | What it does |
 |---|---|
-| `LogPaywallDisplay(…) → Task<string>` | The impression beacon, returning the `viewId` it minted. Prefer it over `LogPaywallShown` whenever you intend to report the close or an interaction — that id is what pairs the halves of one display. |
+| `LogPaywallDisplay(…) → Task<string>` | The impression beacon, returning the `viewId` it minted. Prefer it over `LogPaywallShown` whenever you intend to report the close or an interaction: that id is what pairs the halves of one display. |
 | `LogPaywallClosed(viewId, …)` | Ends that display. Idempotent per view id, so a retry or a double-dismiss cannot count two. Without it a funnel knows how many saw the paywall, not how many left without buying. |
-| `LogPaywallEvent(evt, viewId, …)` | One of six interactions — `Selected`, `PurchaseStarted`, `PurchaseAbandoned`, `PurchaseFailed`, `Restore`, `Error` — i.e. what happened BETWEEN the display and the close. |
+| `LogPaywallEvent(evt, viewId, …)` | One of six interactions (`Selected`, `PurchaseStarted`, `PurchaseAbandoned`, `PurchaseFailed`, `Restore`, `Error`), i.e. what happened BETWEEN the display and the close. |
 
 The purchase **outcome** is always yours, even with the built-in renderer:
 your app makes the Unity IAP call, so only your app sees whether the sheet was
@@ -150,7 +150,7 @@ skew a report, it can never grant or revoke access.
 Six placements resolve without a `ResolvePlacement` call: `app_install`,
 `app_launch`, `session_start`, `deeplink_open`, `paywall_decline` and
 `transaction_abandon`. Passing `onImplicitPaywall` to `RevnixSdk.Configure`
-turns them on (off by default — no extra requests for the other five
+turns them on (off by default: no extra requests for the other five
 moments, though `HandleDeepLink` always reports the link it is handed); the
 facade creates a hidden, scene-surviving GameObject whose
 `OnApplicationPause` / `OnApplicationFocus` feed `session_start`, and the SDK
@@ -161,7 +161,7 @@ configured none of the six costs that request and nothing else.
 var mainThread = System.Threading.SynchronizationContext.Current;
 RevnixSdk.Configure("rvx_pk_live_…", "https://….convex.site",
     onImplicitPaywall: trigger =>
-        // Background continuation — dispatch before touching the scene.
+        // Background continuation - dispatch before touching the scene.
         mainThread.Post(_ => ShowPaywall(trigger.Resolution), null));
 
 // deeplink_open is the one moment the SDK cannot see itself:
@@ -172,12 +172,12 @@ Application.deepLinkActivated += url => _ = RevnixSdk.Client.HandleDeepLink(url)
 
 `Application.absoluteURL` holds the link that launched the closed game;
 `deepLinkActivated` fires for links that arrive while it runs. Run both
-once per launch, where `Configure` runs — `absoluteURL` keeps the latest
+once per launch, where `Configure` runs: `absoluteURL` keeps the latest
 link for the life of the process, so reading it again on a later scene
 load would count the same open twice. From v0.3.0,
 `HandleDeepLink` also ignores a null or empty URL itself.
 
-Set `PlacementKey = trigger.Resolution.PlacementKey` on the paywall options —
+Set `PlacementKey = trigger.Resolution.PlacementKey` on the paywall options:
 that marks the display as implicit and is what stops a `paywall_decline`
 paywall from firing `paywall_decline` again. A close is a decline: never
 report one for a display that ended in a purchase.
@@ -187,7 +187,7 @@ preview (`<scheme>://revnix-preview?revnix_preview=<token>`, scanned or
 tapped from the paywall builder): it fetches the draft paywall and hands it
 to `onImplicitPaywall` with `Resolution.PlacementKey == "revnix_preview"`,
 never firing `deeplink_open` or writing to the ledger. Purchases are
-disabled on a preview — a tap logs a warning instead.
+disabled on a preview; a tap logs a warning instead.
 
 ### Deferred deep links
 
@@ -205,26 +205,27 @@ RevnixSdk.Configure("rvx_pk_live_…", "https://….convex.site",
 
 `RegisterInstall` (fired at startup, install platform reported as
 `"ios"`/`"android"` automatically) can only come back with a `probabilistic`
-match — a same-network click within the last hour, so it can be wrong on a
+match (a same-network click within the last hour), so it can be wrong on a
 shared network. It never carries an install referrer, so it can never answer
 `exact`.
 
 `exact` only ever comes from Android's Play Install Referrer, and reading it
-is still manual here — unlike the Flutter and Capacitor SDKs, which read it
-for you, a Unity game must add
+is manual here, as it is in Flutter and in revnix-capacitor 1.2.3 (only the
+native Android SDK, and Capacitor from the release after 1.2.3, read it for
+you). A Unity game must add
 `implementation 'com.android.installreferrer:installreferrer:2.2'` to its own
 `Assets/Plugins/Android/mainTemplate.gradle`, read the referrer itself, and
 hand the raw string to `RevnixSdk.HandleInstallReferrer(referrer)`, which
 reports it to the server and delivers to the same `onDeferredDeepLink`
-handler. Skip this call on Android and no deferred link — exact or
-probabilistic — ever arrives there; iOS has no referrer to read, so it
+handler. Skip this call on Android and no deferred link (exact or
+probabilistic) ever arrives there; iOS has no referrer to read, so it
 relies on `RegisterInstall`'s probabilistic match alone. Route the URL
 yourself; optionally also pass it to `HandleDeepLink` for `deeplink_open`
 paywall rules.
 
 ### Apple Search Ads attribution
 
-iOS only. Like the Play Install Referrer above, reading this is manual here —
+iOS only. Like the Play Install Referrer above, reading this is manual here:
 this package ships no `ios/` native layer, so there is nothing here to call
 Apple's `AAAttribution` from. Mint the token yourself in your own native iOS
 plugin and hand it over:
@@ -235,8 +236,8 @@ RevnixSdk.HandleAttributionToken(token);
 
 The server resolves it to which Apple Search Ads campaign, if any, drove the
 install. `"resolved"` (a campaign was named) and `"organic"` (Apple answered,
-not an ASA install) are final; `"pending"` means Apple couldn't yet answer — a
-freshly minted token is unregistered on Apple's side for a few seconds — and
+not an ASA install) are final; `"pending"` means Apple couldn't yet answer (a
+freshly minted token is unregistered on Apple's side for a few seconds) and
 is worth retrying with a fresh token on the next cold start. The facade call
 is fire-and-forget; call `RevnixSdk.Client.HandleAttributionToken(token)`
 directly if you need that verdict to decide whether to retry.
@@ -272,7 +273,7 @@ not cleared by `Logout`.
 
 ### The install-attribution verdict
 
-Which signal the install was matched on — and the campaign facts that came
+Which signal the install was matched on, and the campaign facts that came
 with it. Pass `onAttribution` to `Configure` to be told whenever the verdict
 changes (once when the install is first attributed, again on a
 re-attribution, never twice for the same verdict), or ask for it yourself:
@@ -290,10 +291,28 @@ if (attribution != null) Log(attribution.InstallMatch, attribution.Campaign);
 the customer was never re-attributed), and `LinkToken`, `ReferrerSource`,
 `MatchSignals`, `Source`, `Medium`, `Campaign`, `Term` and `Content` are null
 when the server sent none. `GetAttribution` returns null when no install has
-been attributed yet — a cold start can ask before its own install report
-lands — and on any failure; it never throws. The SDK only asks for the
+been attributed yet (a cold start can ask before its own install report
+lands) and on any failure; it never throws. The SDK only asks for the
 verdict on its own (after the install, install-referrer and Apple Search Ads
 reports) when `onAttribution` is set.
+
+### Ad revenue
+
+Call `LogAdRevenue` from your mediation SDK's paid-event callback (AdMob
+`OnPaidEvent`, AppLovin MAX `OnAdRevenuePaidEvent`). Fire-and-forget: a
+non-finite or zero-or-less `revenue` is dropped with a diagnostic, and the
+optional strings are truncated to 100 characters. It feeds the Return on ad
+spend table, see [Ad revenue](https://revnix.io/docs/ad-revenue):
+
+```csharp
+// from your mediation SDK's paid-event callback
+_ = RevnixSdk.Client.LogAdRevenue(
+    revenue, "USD",
+    network: networkName,
+    mediation: "applovin_max",
+    adUnit: adUnitId,
+    format: "rewarded");
+```
 
 ## Targeting an A/B audience
 

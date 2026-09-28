@@ -8,6 +8,11 @@
   `OnPaidEvent`, AppLovin MAX `OnAdRevenuePaidEvent`) to `POST /v1/ad-revenue`.
   Fire-and-forget like the other beacons; a non-finite or non-positive
   `revenue` is dropped locally rather than sent. (PT8)
+- **`SetAttribution`.** `RevnixSdk.Client.SetAttribution(provider, network,
+  campaign:, adGroup:, creative:)` forwards an MMP's attribution callback
+  (Adjust, AppsFlyer, Singular, Branch, Kochava, Tenjin, Airbridge) to
+  `POST /v1/attribution` so Revnix credits revenue to the right
+  network/campaign. Fire-and-forget like `LogAdRevenue`. (PT11)
 - **`previousSessionMs` on `session_start`.** Every `session_start` implicit
   trigger after the first now reports how long the previous session lasted,
   in milliseconds, so the server can stamp it onto that session's

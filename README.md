@@ -314,6 +314,36 @@ _ = RevnixSdk.Client.LogAdRevenue(
     format: "rewarded");
 ```
 
+### MMP attribution
+
+If you already run an MMP (Adjust, AppsFlyer, Singular, Branch, Kochava,
+Tenjin, Airbridge), call `SetAttribution` from its attribution callback so
+Revnix credits revenue to the right network/campaign. Fire-and-forget, like
+`LogAdRevenue`:
+
+```csharp
+// Adjust's attribution callback
+void OnAttributionChanged(AdjustAttribution attribution)
+{
+    _ = RevnixSdk.Client.SetAttribution(
+        "adjust", attribution.Network,
+        campaign: attribution.Campaign,
+        adGroup: attribution.Adgroup,
+        creative: attribution.Creative);
+}
+
+// AppsFlyer's onConversionDataSuccess
+void OnConversionDataSuccess(Dictionary<string, object> data)
+{
+    if ((string)data["af_status"] == "Organic") return;
+    _ = RevnixSdk.Client.SetAttribution(
+        "appsflyer", (string)data["media_source"],
+        campaign: data.TryGetValue("campaign", out var c) ? (string)c : null,
+        adGroup: data.TryGetValue("af_adset", out var g) ? (string)g : null,
+        creative: data.TryGetValue("af_ad", out var cr) ? (string)cr : null);
+}
+```
+
 ## Targeting an A/B audience
 
 An experiment can be narrowed to an audience: conditions over customer

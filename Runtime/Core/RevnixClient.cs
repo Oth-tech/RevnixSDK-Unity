@@ -39,6 +39,7 @@ namespace Revnix
         private const string KeyDeferredDeepLinkDelivered = "revnix.deferredDeepLinkDelivered";
         private const string KeyLastDeepLink = "revnix.lastDeepLink";
         private const string KeyAttribution = "revnix.attribution";
+        private const string KeyLastAttribution = "revnix.lastAttribution";
         private const string KeySessionStartedAt = "revnix.sessionStartedAt";
         private const string KeyLastBackgroundAt = "revnix.lastBackgroundAt";
 
@@ -1274,6 +1275,40 @@ namespace Revnix
             {
                 _bgFailures += 1;
                 Diagnostic("logAdRevenue", err.Message);
+            }
+        }
+
+        /// <summary>PT11: forward an MMP's attribution callback (Adjust, AppsFlyer, …) so
+        /// Revnix credits revenue to the right network/campaign. Fire-and-forget.</summary>
+        public async Task SetAttribution(
+            string provider,
+            string network,
+            string campaign = null,
+            string adGroup = null,
+            string creative = null)
+        {
+            var payload = string.Join(
+                "\u0001", provider, network, campaign ?? "", adGroup ?? "", creative ?? "");
+            if (_config.Storage.Get(KeyLastAttribution) == payload) return;
+            var body = new Dictionary<string, object>
+            {
+                ["customerId"] = CustomerId(),
+                ["provider"] = Truncate(provider),
+                ["network"] = Truncate(network),
+                ["sdkVersion"] = SdkVersion,
+            };
+            if (campaign != null) body["campaign"] = Truncate(campaign);
+            if (adGroup != null) body["adGroup"] = Truncate(adGroup);
+            if (creative != null) body["creative"] = Truncate(creative);
+            try
+            {
+                await Request("POST", new[] { "v1", "attribution" }, body);
+                _config.Storage.Set(KeyLastAttribution, payload);
+            }
+            catch (RevnixException err)
+            {
+                _bgFailures += 1;
+                Diagnostic("setAttribution", err.Message);
             }
         }
 

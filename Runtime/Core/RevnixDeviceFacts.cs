@@ -38,6 +38,11 @@ namespace Revnix
         public string Model;
         /// <summary>True for a development / debug build.</summary>
         public bool? Sandbox;
+        /// <summary>Opaque per-device id sent only with install reports, not
+        /// the resolve header. Survives an uninstall/reinstall on Android;
+        /// on iOS it's best-effort (IDFV), resetting when no other app from
+        /// the same vendor stays installed.</summary>
+        public string DeviceKey;
 
         /// <summary>A copy of these facts with every non-null field of
         /// <paramref name="over"/> winning.</summary>
@@ -54,6 +59,7 @@ namespace Revnix
                 Storefront = over.Storefront ?? Storefront,
                 Model = over.Model ?? Model,
                 Sandbox = over.Sandbox ?? Sandbox,
+                DeviceKey = over.DeviceKey ?? DeviceKey,
             };
         }
 

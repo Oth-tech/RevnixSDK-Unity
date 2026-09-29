@@ -28,7 +28,7 @@ namespace Revnix.Tests
         }
 
         private static RevnixClient MakeClient(
-            FakeHttp http, out List<(string url, DeferredDeepLinkMatch match)> seen)
+            FakeHttp http, out List<(string url, DeferredDeepLinkMatch match)> seen, DeviceFacts device = null)
         {
             var captured = new List<(string, DeferredDeepLinkMatch)>();
             seen = captured;
@@ -37,6 +37,7 @@ namespace Revnix.Tests
                 ApiKey = "rvx_pk_test",
                 BaseUrl = "https://x",
                 Http = http,
+                Device = device,
                 OnDeferredDeepLink = (url, match) => captured.Add((url, match)),
             };
             return new RevnixClient(config);
@@ -66,6 +67,30 @@ namespace Revnix.Tests
             var call = http.Calls.Find(c => c.url.Contains("/v1/installs"));
             StringAssert.Contains("\"platform\":\"android\"", call.body);
             StringAssert.Contains("\"appVersion\":\"1.2.3\"", call.body);
+        }
+
+        [Test]
+        public void HandleInstallReferrerIncludesDeviceKeyWhenSet()
+        {
+            var http = new FakeHttp();
+            var client = MakeClient(http, out _, new DeviceFacts { DeviceKey = "dev-key-1" });
+
+            client.HandleInstallReferrer("utm_source=instagram").GetAwaiter().GetResult();
+
+            var call = http.Calls.Find(c => c.url.Contains("/v1/installs"));
+            StringAssert.Contains("\"deviceKey\":\"dev-key-1\"", call.body);
+        }
+
+        [Test]
+        public void HandleInstallReferrerOmitsDeviceKeyWhenNull()
+        {
+            var http = new FakeHttp();
+            var client = MakeClient(http, out _);
+
+            client.HandleInstallReferrer("utm_source=instagram").GetAwaiter().GetResult();
+
+            var call = http.Calls.Find(c => c.url.Contains("/v1/installs"));
+            StringAssert.DoesNotContain("deviceKey", call.body);
         }
 
         [Test]
@@ -190,6 +215,30 @@ namespace Revnix.Tests
             Assert.AreEqual(1, seen.Count);
             Assert.AreEqual("https://x.app/promo", seen[0].url);
             Assert.AreEqual(DeferredDeepLinkMatch.Probabilistic, seen[0].match);
+        }
+
+        [Test]
+        public void RegisterInstallIncludesDeviceKeyWhenSet()
+        {
+            var http = new FakeHttp();
+            var client = MakeClient(http, out _, new DeviceFacts { DeviceKey = "dev-key-1" });
+
+            client.RegisterInstall().GetAwaiter().GetResult();
+
+            var call = http.Calls.Find(c => c.url.Contains("/v1/installs"));
+            StringAssert.Contains("\"deviceKey\":\"dev-key-1\"", call.body);
+        }
+
+        [Test]
+        public void RegisterInstallOmitsDeviceKeyWhenNull()
+        {
+            var http = new FakeHttp();
+            var client = MakeClient(http, out _);
+
+            client.RegisterInstall().GetAwaiter().GetResult();
+
+            var call = http.Calls.Find(c => c.url.Contains("/v1/installs"));
+            StringAssert.DoesNotContain("deviceKey", call.body);
         }
 
         [Test]

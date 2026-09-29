@@ -344,6 +344,24 @@ void OnConversionDataSuccess(Dictionary<string, object> data)
 }
 ```
 
+### Uninstall measurement
+
+Revnix measures uninstalls the way Adjust/AppsFlyer do: register the
+device's push token from whatever push plugin the game already uses
+(Firebase Messaging on Android, APNs on iOS), and once a day a silent push
+probes it; when the store reports the token dead, the customer gets an
+`app.uninstalled` event:
+
+```csharp
+_ = RevnixSdk.Client.SetPushToken(token);
+```
+
+Fire-and-forget, like `SetAttribution`. Only sends when the device facts
+platform is `ios`/`android` (no-op elsewhere). Requires the game's own push
+setup: Firebase Cloud Messaging on Android, Push Notifications + Background
+Modes → Remote notifications on iOS. See
+[Uninstall measurement](https://revnix.io/docs/uninstall-measurement).
+
 ## Targeting an A/B audience
 
 An experiment can be narrowed to an audience: conditions over customer

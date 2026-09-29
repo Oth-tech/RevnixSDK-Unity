@@ -40,6 +40,7 @@ namespace Revnix
         private const string KeyLastDeepLink = "revnix.lastDeepLink";
         private const string KeyAttribution = "revnix.attribution";
         private const string KeyLastAttribution = "revnix.lastAttribution";
+        private const string KeyLastPushToken = "revnix.lastPushToken";
         private const string KeySessionStartedAt = "revnix.sessionStartedAt";
         private const string KeyLastBackgroundAt = "revnix.lastBackgroundAt";
 
@@ -1309,6 +1310,41 @@ namespace Revnix
             {
                 _bgFailures += 1;
                 Diagnostic("setAttribution", err.Message);
+            }
+        }
+
+        /// <summary>Register this device's push token for uninstall
+        /// measurement: Revnix sends a daily silent probe and records
+        /// <c>app.uninstalled</c> when APNs/FCM report the token dead.
+        /// iOS/Android only, fire-and-forget.</summary>
+        public async Task SetPushToken(string token)
+        {
+            var trimmed = token?.Trim() ?? "";
+            if (trimmed.Length == 0) return;
+            var platform = _config.Device?.Platform;
+            if (platform != "ios" && platform != "android")
+            {
+                Diagnostic("setPushToken", $"unsupported platform: {platform}");
+                return;
+            }
+            var payload = string.Join("\u0001", CustomerId(), trimmed);
+            if (_config.Storage.Get(KeyLastPushToken) == payload) return;
+            var body = new Dictionary<string, object>
+            {
+                ["customerId"] = CustomerId(),
+                ["platform"] = platform,
+                ["token"] = trimmed,
+                ["sdkVersion"] = SdkVersion,
+            };
+            try
+            {
+                await Request("POST", new[] { "v1", "push-token" }, body);
+                _config.Storage.Set(KeyLastPushToken, payload);
+            }
+            catch (RevnixException err)
+            {
+                _bgFailures += 1;
+                Diagnostic("setPushToken", err.Message);
             }
         }
 

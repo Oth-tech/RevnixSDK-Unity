@@ -1279,6 +1279,54 @@ namespace Revnix
             }
         }
 
+        private static readonly Regex TrackEventNameRe = new Regex(@"^[a-z0-9_]{1,64}\z");
+
+        /// <summary>Report a custom in-app event (not a purchase; purchases go through
+        /// <see cref="RegisterPurchase"/>). Fire-and-forget.</summary>
+        public async Task Track(
+            string eventName,
+            IDictionary<string, object> properties = null,
+            string eventId = null)
+        {
+            if (eventName == null || !TrackEventNameRe.IsMatch(eventName))
+            {
+                Diagnostic("track", "event must match ^[a-z0-9_]{1,64}$");
+                return;
+            }
+            var body = new Dictionary<string, object>
+            {
+                ["customerId"] = CustomerId(),
+                ["event"] = eventName,
+                ["eventId"] = eventId ?? Guid.NewGuid().ToString("D").ToLowerInvariant(),
+                ["occurredAt"] = _config.Now(),
+            };
+            if (properties != null)
+            {
+                var props = new Dictionary<string, object>();
+                foreach (var pair in properties)
+                {
+                    switch (pair.Value)
+                    {
+                        case string _: case bool _: case int _: case long _:
+                        case double d when !double.IsNaN(d) && !double.IsInfinity(d):
+                        case float f when !float.IsNaN(f) && !float.IsInfinity(f):
+                            props[pair.Key] = pair.Value;
+                            break;
+                    }
+                }
+                body["properties"] = props;
+            }
+            try
+            {
+                await Request("POST", new[] { "v1", "events" }, body);
+            }
+            catch (RevnixException err)
+            {
+                _bgFailures += 1;
+                Diagnostic("track", err.Message);
+            }
+        }
+
         /// <summary>PT11: forward an MMP's attribution callback (Adjust, AppsFlyer, …) so
         /// Revnix credits revenue to the right network/campaign. Fire-and-forget.</summary>
         public async Task SetAttribution(

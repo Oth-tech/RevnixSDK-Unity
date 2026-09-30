@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`Track`.** `RevnixSdk.Client.Track(eventName, properties:, eventId:)`
+  reports a custom in-app event (not a purchase) to `POST /v1/events`.
+  Fire-and-forget like `LogAdRevenue`; the event name must match
+  `^[a-z0-9_]{1,64}$` or it's dropped locally with a diagnostic — the server
+  validates `properties`. (MS8)
 - **`LogAdRevenue`.** `RevnixSdk.Client.LogAdRevenue(revenue, currency, network:,
   mediation:, adUnit:, placement:, format:, eventId:)` reports impression-level
   ad revenue from your mediation SDK's paid-event callback (AdMob

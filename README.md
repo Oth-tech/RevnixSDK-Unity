@@ -314,6 +314,18 @@ _ = RevnixSdk.Client.LogAdRevenue(
     format: "rewarded");
 ```
 
+### Custom events
+
+Call `Track` to report a custom in-app event (not a purchase — purchases go
+through `RegisterPurchase`). Fire-and-forget, like `LogAdRevenue`; the event
+name must match `^[a-z0-9_]{1,64}$` or it's dropped with a diagnostic:
+
+```csharp
+_ = RevnixSdk.Client.Track(
+    "level_up",
+    new Dictionary<string, object> { ["level"] = 5 });
+```
+
 ### MMP attribution
 
 If you already run an MMP (Adjust, AppsFlyer, Singular, Branch, Kochava,

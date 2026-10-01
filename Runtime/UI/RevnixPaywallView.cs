@@ -922,7 +922,7 @@ namespace Revnix.Unity.UI
             if (RevnixPaywallLogic.Truthy(review.Author))
             {
                 Spacer(card.transform, 6f);
-                MakeText(card.transform, "— " + review.Author, 12, false,
+                MakeText(card.transform, review.Author, 12, false,
                     _textSecondary, TextAnchor.MiddleCenter, 0f, stretch: false);
             }
             Spacer(col, 22f);

@@ -949,6 +949,7 @@ namespace Revnix
             };
             if (platform != null) body["platform"] = platform;
             if (appVersion != null) body["appVersion"] = appVersion;
+            if (_config.Device?.DeviceKey != null) body["deviceKey"] = _config.Device.DeviceKey;
             try
             {
                 var raw = await Request("POST", new[] { "v1", "installs" }, body);
@@ -985,6 +986,7 @@ namespace Revnix
             };
             if (platform != null) body["platform"] = platform;
             if (appVersion != null) body["appVersion"] = appVersion;
+            if (_config.Device?.DeviceKey != null) body["deviceKey"] = _config.Device.DeviceKey;
             try
             {
                 var raw = await Request("POST", new[] { "v1", "installs" }, body);
@@ -1028,6 +1030,7 @@ namespace Revnix
             };
             if (platform != null) body["platform"] = platform;
             if (appVersion != null) body["appVersion"] = appVersion;
+            if (_config.Device?.DeviceKey != null) body["deviceKey"] = _config.Device.DeviceKey;
             try
             {
                 var raw = await Request("POST", new[] { "v1", "installs" }, body);

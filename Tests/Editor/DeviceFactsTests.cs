@@ -70,6 +70,27 @@ namespace Revnix.Tests
         }
 
         [Test]
+        public void OverriddenByCarriesDeviceKey()
+        {
+            var detected = new DeviceFacts { DeviceKey = "abc-123" };
+            var merged = detected.OverriddenBy(new DeviceFacts { DeviceKey = "xyz-789" });
+            Assert.AreEqual("xyz-789", merged.DeviceKey);
+
+            var fallback = detected.OverriddenBy(new DeviceFacts());
+            Assert.AreEqual("abc-123", fallback.DeviceKey);
+        }
+
+        [Test]
+        public void EncodedHeaderNeverContainsDeviceKey()
+        {
+            var header = new DeviceFacts { Platform = "ios", DeviceKey = "abc-123" }
+                .EncodedHeader("0.3.0", null, null);
+            var decoded = Decode(header);
+            Assert.IsFalse(decoded.ContainsKey("deviceKey"));
+            StringAssert.DoesNotContain("abc-123", header);
+        }
+
+        [Test]
         public void NonAsciiSurvivesTheEncoding()
         {
             var decoded = Decode(new DeviceFacts { Model = "端末", Locale = "ja-JP" }.EncodedHeader("0.3.0", null, null));

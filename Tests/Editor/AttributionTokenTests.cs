@@ -26,13 +26,14 @@ namespace Revnix.Tests
             }
         }
 
-        private static RevnixClient MakeClient(FakeHttp http)
+        private static RevnixClient MakeClient(FakeHttp http, DeviceFacts device = null)
         {
             var config = new RevnixConfig
             {
                 ApiKey = "rvx_pk_test",
                 BaseUrl = "https://x",
                 Http = http,
+                Device = device,
             };
             return new RevnixClient(config);
         }
@@ -114,6 +115,30 @@ namespace Revnix.Tests
             var call = http.Calls.Find(c => c.url.Contains("/v1/installs"));
             StringAssert.Contains("\"platform\":\"ios\"", call.body);
             StringAssert.Contains("\"appVersion\":\"1.2.3\"", call.body);
+        }
+
+        [Test]
+        public void HandleAttributionTokenIncludesDeviceKeyWhenSet()
+        {
+            var http = new FakeHttp();
+            var client = MakeClient(http, new DeviceFacts { DeviceKey = "dev-key-1" });
+
+            client.HandleAttributionToken("abc123").GetAwaiter().GetResult();
+
+            var call = http.Calls.Find(c => c.url.Contains("/v1/installs"));
+            StringAssert.Contains("\"deviceKey\":\"dev-key-1\"", call.body);
+        }
+
+        [Test]
+        public void HandleAttributionTokenOmitsDeviceKeyWhenNull()
+        {
+            var http = new FakeHttp();
+            var client = MakeClient(http);
+
+            client.HandleAttributionToken("abc123").GetAwaiter().GetResult();
+
+            var call = http.Calls.Find(c => c.url.Contains("/v1/installs"));
+            StringAssert.DoesNotContain("deviceKey", call.body);
         }
     }
 }

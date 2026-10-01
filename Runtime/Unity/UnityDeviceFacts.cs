@@ -25,6 +25,7 @@ namespace Revnix.Unity
                 // Invariant / unknown region on some players — no currency.
             }
             var locale = CultureInfo.CurrentCulture.Name;
+            var deviceId = SystemInfo.deviceUniqueIdentifier;
             return new DeviceFacts
             {
                 Platform = PlatformName(Application.platform),
@@ -34,6 +35,7 @@ namespace Revnix.Unity
                 Currency = Blank(currency) ? null : currency,
                 Model = Blank(SystemInfo.deviceModel) ? null : SystemInfo.deviceModel,
                 Sandbox = Debug.isDebugBuild,
+                DeviceKey = Blank(deviceId) || deviceId == SystemInfo.unsupportedIdentifier ? null : deviceId,
             };
         }
 

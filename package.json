@@ -2,7 +2,7 @@
   "name": "com.revnix.sdk",
   "version": "0.3.0",
   "displayName": "Revnix",
-  "description": "Revnix subscriptions and entitlements for Unity — offline-resilient entitlement checks, placements, purchase registration with a durable retry queue, and an optional Unity IAP bridge.",
+  "description": "Revnix subscriptions and entitlements for Unity: offline-resilient entitlement checks, placements, purchase registration with a durable retry queue, and an optional Unity IAP bridge.",
   "unity": "2021.3",
   "documentationUrl": "https://revnix.io/docs",
   "changelogUrl": "https://github.com/Oth-tech/RevnixSDK-Unity/blob/main/CHANGELOG.md",

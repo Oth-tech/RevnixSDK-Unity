@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **`SetPushToken`.** `RevnixSdk.Client.SetPushToken(token)` registers the
+  device push token for uninstall measurement (ios/android only),
+  fire-and-forget, deduped per customer+token. (MS1)
+- **`DeviceKey` on install reports.** `RegisterInstall`, `HandleInstallReferrer`
+  and `HandleAttributionToken` now send `DeviceKey` (from
+  `SystemInfo.deviceUniqueIdentifier`) so the server can flag a reinstall.
+  (MS2)
+- **`RevnixSdk.SetLocale(tag)` and localized footer labels.** Forces every
+  paywall built afterwards into that language; `RevnixLocale.LinkLabels`
+  renders Restore/Terms/Privacy in 43 languages.
 - **`Track`.** `RevnixSdk.Client.Track(eventName, properties:, eventId:)`
   reports a custom in-app event (not a purchase) to `POST /v1/events`.
   Fire-and-forget like `LogAdRevenue`; the event name must match

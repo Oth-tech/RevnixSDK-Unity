@@ -30,7 +30,8 @@ and `revnix_flutter`, ported to C#:
 - **Device facts**: `ResolvePlacement` sends platform, OS and app version,
   locale, currency, model, sandbox, install date and first open as
   `X-Revnix-Device`, so targeting rules can use them; `SendDeviceFacts = false`
-  disables.
+  disables. Install reports also carry `DeviceKey`
+  (`SystemInfo.deviceUniqueIdentifier`) so the server can flag a reinstall.
 - **Optional Unity IAP bridge**: auto-detected via version defines
   (`com.unity.purchasing` 4.0.0+); maps a purchased `Product` straight to a
   registration.
@@ -111,6 +112,10 @@ selection from the app (controlled mode, RN semantics; set null to hand
 control back to the view). Footer links honor the dashboard's footer config;
 an explicit `OnTerms`/`OnPrivacy` handler wins over a config URL, which
 otherwise opens via `Application.OpenURL`.
+
+`RevnixSdk.SetLocale("de")` forces every paywall built afterwards into that
+language (null or empty clears it); `RevnixPaywallOptions.Locale` overrides
+it for one view.
 
 ### Reporting the whole life of a display
 

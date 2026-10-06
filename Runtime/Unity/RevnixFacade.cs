@@ -140,6 +140,12 @@ namespace Revnix.Unity
         /// of throwing.</summary>
         public static Task<string> ResolveDeepLink(string url) => Client.ResolveDeepLink(url);
 
+        /// <summary>Forces every paywall's language to <paramref name="tag"/>
+        /// instead of the device's, for a game whose in-app language picker
+        /// differs from the OS locale. Affects paywalls built AFTER this call;
+        /// null or empty clears the override.</summary>
+        public static void SetLocale(string tag) => RevnixLocale.SetLocaleOverride(tag);
+
         private static async void RunLaunchChores(RevnixClient client)
         {
             try

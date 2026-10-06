@@ -624,15 +624,16 @@ namespace Revnix.Unity.UI
         {
             // An explicit host handler wins over the config URL — the app knows
             // best how to open its own legal pages; the URL is the fallback.
+            var labels = RevnixLocale.LinkLabels(_doc.Localization?.DefaultLocale);
             var entries = new List<KeyValuePair<string, Action>>();
-            if (block.ShowRestore != false) entries.Add(Pair("Restore", _ctx.OnRestore, null));
+            if (block.ShowRestore != false) entries.Add(Pair(labels.Restore, _ctx.OnRestore, null));
             if (block.ShowTerms != false)
             {
-                entries.Add(Pair("Terms", _ctx.OnTerms, block.TermsUrl ?? _ctx.FooterTermsUrl));
+                entries.Add(Pair(labels.Terms, _ctx.OnTerms, block.TermsUrl ?? _ctx.FooterTermsUrl));
             }
             if (block.ShowPrivacy != false)
             {
-                entries.Add(Pair("Privacy", _ctx.OnPrivacy, block.PrivacyUrl ?? _ctx.FooterPrivacyUrl));
+                entries.Add(Pair(labels.Privacy, _ctx.OnPrivacy, block.PrivacyUrl ?? _ctx.FooterPrivacyUrl));
             }
             if (entries.Count == 0) return null;
 

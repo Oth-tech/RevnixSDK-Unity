@@ -14,11 +14,18 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using Revnix;
+using Revnix.Unity;
 
 namespace Revnix.Tests
 {
     public class PaywallLocalizationTests
     {
+        [TearDown]
+        public void ClearLocaleOverride()
+        {
+            RevnixSdk.SetLocale(null);
+        }
+
         private const string Json = @"{
           ""version"": 1, ""background"": ""#101014"", ""textColor"": ""#F5F7FA"",
           ""accent"": ""#6478ff"", ""accentInk"": ""#0B0D10"",
@@ -152,6 +159,58 @@ namespace Revnix.Tests
             var doc = Doc(broken);
             Assert.IsTrue(doc.Localization.IsEmpty);
             Assert.AreEqual("Unlock Pro", RevnixLocale.Localize(doc, "es").Blocks[0].Text);
+        }
+
+        [Test]
+        public void LinkLabelsResolveByLanguage()
+        {
+            Assert.AreEqual(("بحال کریں", "شرائط", "رازداری"), RevnixLocale.LinkLabels("ur"));
+            Assert.AreEqual(("بحال کریں", "شرائط", "رازداری"), RevnixLocale.LinkLabels("ur-PK"));
+            Assert.AreEqual(("Restaurar", "Termos", "Privacidade"), RevnixLocale.LinkLabels("pt_BR"));
+        }
+
+        [Test]
+        public void LinkLabelsPickMandarinScriptByRegion()
+        {
+            var traditional = ("恢復購買", "條款", "隱私");
+            var simplified = ("恢复购买", "条款", "隐私");
+            Assert.AreEqual(traditional, RevnixLocale.LinkLabels("zh-Hant-TW"));
+            Assert.AreEqual(traditional, RevnixLocale.LinkLabels("zh-TW"));
+            Assert.AreEqual(traditional, RevnixLocale.LinkLabels("zh-HK"));
+            Assert.AreEqual(simplified, RevnixLocale.LinkLabels("zh-Hans-HK"));
+            Assert.AreEqual(simplified, RevnixLocale.LinkLabels("zh-CN"));
+            Assert.AreEqual(simplified, RevnixLocale.LinkLabels("zh"));
+        }
+
+        [Test]
+        public void LinkLabelsApplyAliasesAndFallBackToEnglish()
+        {
+            var english = ("Restore", "Terms", "Privacy");
+            Assert.AreEqual(("שחזור", "תנאים", "פרטיות"), RevnixLocale.LinkLabels("iw"));
+            Assert.AreEqual(("Gjenopprett", "Vilkår", "Personvern"), RevnixLocale.LinkLabels("no"));
+            Assert.AreEqual(english, RevnixLocale.LinkLabels("xx"));
+            Assert.AreEqual(english, RevnixLocale.LinkLabels(null));
+            Assert.AreEqual(english, RevnixLocale.LinkLabels(""));
+        }
+
+        [Test]
+        public void LocalizeSetsDefaultLocaleToTheChainsTopPick()
+        {
+            const string json = @"{
+              ""version"": 1, ""background"": ""#000"", ""textColor"": ""#fff"",
+              ""accent"": ""#6478ff"", ""accentInk"": ""#fff"",
+              ""locales"": { ""es"": { ""hed.text"": ""Hola"" } },
+              ""blocks"": [ { ""id"": ""hed"", ""type"": ""text"", ""text"": ""Hi"" } ]
+            }";
+            var doc = RevnixLocale.Localize(Doc(json), "es-MX");
+            Assert.AreEqual("es", doc.Localization.DefaultLocale);
+        }
+
+        [Test]
+        public void SetLocaleOverridesTheDeviceLocale()
+        {
+            RevnixSdk.SetLocale("ur");
+            Assert.AreEqual("ur", RevnixLocale.DeviceLocale());
         }
     }
 }

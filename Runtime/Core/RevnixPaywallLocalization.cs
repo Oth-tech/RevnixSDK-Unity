@@ -21,8 +21,9 @@ namespace Revnix
     /// <summary>The translations published with a document.</summary>
     public sealed class PaywallLocalization
     {
-        /// <summary>The language the tree's own copy is written in. Never a
-        /// key in <see cref="Tables"/>.</summary>
+        /// <summary>The language the tree's own copy is written in; a
+        /// localized copy names the language it was localized to. Never a key
+        /// in a parsed doc's <see cref="Tables"/>.</summary>
         public string DefaultLocale;
 
         /// <summary>BCP-47 tag → (<c>&lt;blockId&gt;.&lt;path&gt;</c> →
@@ -177,6 +178,13 @@ namespace Revnix
             return chain;
         }
 
+        private static string _localeOverride;
+
+        internal static void SetLocaleOverride(string tag)
+        {
+            _localeOverride = string.IsNullOrEmpty(tag) ? null : tag;
+        }
+
         /// <summary>
         /// The device's language. <c>CurrentUICulture</c> is what Unity sets
         /// from the system language, so a paywall matching it matches whatever
@@ -184,6 +192,7 @@ namespace Revnix
         /// </summary>
         public static string DeviceLocale()
         {
+            if (_localeOverride != null) return _localeOverride;
             try
             {
                 var name = CultureInfo.CurrentUICulture.Name;
@@ -239,6 +248,7 @@ namespace Revnix
 
             var copy = doc.ShallowCopy();
             copy.Blocks = LocalizeAll(doc.Blocks, lookup);
+            copy.Localization = new PaywallLocalization { DefaultLocale = chain[0], Tables = tables };
             return copy;
         }
 
@@ -300,5 +310,102 @@ namespace Revnix
             }
             return copy;
         }
+
+        private static readonly Dictionary<string, string> LinkLabelAliases =
+            new Dictionary<string, string>
+        {
+            { "iw", "he" },
+            { "in", "id" },
+            { "no", "nb" },
+            { "tl", "fil" },
+        };
+
+        /// <summary>The three built-in paywall footer labels (restore/terms/
+        /// privacy), in the language <paramref name="locale"/> resolves to.
+        /// Falls back to English for any language not in the 43-entry table.
+        /// Mandarin picks traditional script for Taiwan, Hong Kong and Macau
+        /// unless the tag is explicitly simplified.</summary>
+        public static (string Restore, string Terms, string Privacy) LinkLabels(string locale)
+        {
+            var row = LinkLabelTable[ResolveLinkLabelTag(locale)];
+            return (row[0], row[1], row[2]);
+        }
+
+        private static string ResolveLinkLabelTag(string locale)
+        {
+            var tag = Normalize(locale);
+            if (tag == null) return "en";
+            var lang = BaseLanguage(tag);
+            if (lang == "zh")
+            {
+                var parts = tag.Split('-');
+                var hasHant = false;
+                var hasHans = false;
+                var isTraditionalRegion = false;
+                for (var i = 1; i < parts.Length; i++)
+                {
+                    if (parts[i] == "Hant") hasHant = true;
+                    else if (parts[i] == "Hans") hasHans = true;
+                    else if (parts[i].Length == 2 && IsAlpha(parts[i]))
+                    {
+                        var region = parts[i].ToUpperInvariant();
+                        if (region == "TW" || region == "HK" || region == "MO")
+                            isTraditionalRegion = true;
+                    }
+                }
+                return hasHant || (!hasHans && isTraditionalRegion) ? "zh-Hant" : "zh";
+            }
+            string alias;
+            var baseTag = LinkLabelAliases.TryGetValue(lang, out alias) ? alias : lang;
+            return LinkLabelTable.ContainsKey(baseTag) ? baseTag : "en";
+        }
+
+        private static readonly Dictionary<string, string[]> LinkLabelTable =
+            new Dictionary<string, string[]>
+        {
+            { "ar", new[] { "استعادة", "الشروط", "الخصوصية" } },
+            { "bg", new[] { "Възстановяване", "Условия", "Поверителност" } },
+            { "bn", new[] { "পুনরুদ্ধার", "শর্তাবলী", "গোপনীয়তা" } },
+            { "ca", new[] { "Restaura", "Condicions", "Privadesa" } },
+            { "cs", new[] { "Obnovit", "Podmínky", "Soukromí" } },
+            { "da", new[] { "Gendan", "Vilkår", "Privatliv" } },
+            { "de", new[] { "Wiederherstellen", "AGB", "Datenschutz" } },
+            { "el", new[] { "Επαναφορά", "Όροι", "Απόρρητο" } },
+            { "en", new[] { "Restore", "Terms", "Privacy" } },
+            { "es", new[] { "Restaurar", "Términos", "Privacidad" } },
+            { "et", new[] { "Taasta", "Tingimused", "Privaatsus" } },
+            { "fa", new[] { "بازیابی", "شرایط", "حریم خصوصی" } },
+            { "fi", new[] { "Palauta", "Ehdot", "Tietosuoja" } },
+            { "fil", new[] { "I-restore", "Mga Tuntunin", "Privacy" } },
+            { "fr", new[] { "Restaurer", "Conditions", "Confidentialité" } },
+            { "he", new[] { "שחזור", "תנאים", "פרטיות" } },
+            { "hi", new[] { "पुनर्स्थापित करें", "शर्तें", "गोपनीयता" } },
+            { "hr", new[] { "Vrati", "Uvjeti", "Privatnost" } },
+            { "hu", new[] { "Visszaállítás", "Feltételek", "Adatvédelem" } },
+            { "id", new[] { "Pulihkan", "Ketentuan", "Privasi" } },
+            { "it", new[] { "Ripristina", "Termini", "Privacy" } },
+            { "ja", new[] { "購入を復元", "利用規約", "プライバシー" } },
+            { "ko", new[] { "구매 복원", "이용약관", "개인정보" } },
+            { "lt", new[] { "Atkurti", "Sąlygos", "Privatumas" } },
+            { "lv", new[] { "Atjaunot", "Noteikumi", "Privātums" } },
+            { "ms", new[] { "Pulihkan", "Terma", "Privasi" } },
+            { "nb", new[] { "Gjenopprett", "Vilkår", "Personvern" } },
+            { "nl", new[] { "Herstellen", "Voorwaarden", "Privacy" } },
+            { "pl", new[] { "Przywróć", "Regulamin", "Prywatność" } },
+            { "pt", new[] { "Restaurar", "Termos", "Privacidade" } },
+            { "ro", new[] { "Restaurează", "Termeni", "Confidențialitate" } },
+            { "ru", new[] { "Восстановить", "Условия", "Конфиденциальность" } },
+            { "sk", new[] { "Obnoviť", "Podmienky", "Súkromie" } },
+            { "sl", new[] { "Obnovi", "Pogoji", "Zasebnost" } },
+            { "sr", new[] { "Врати", "Услови", "Приватност" } },
+            { "sv", new[] { "Återställ", "Villkor", "Integritet" } },
+            { "th", new[] { "กู้คืน", "ข้อกำหนด", "ความเป็นส่วนตัว" } },
+            { "tr", new[] { "Geri Yükle", "Koşullar", "Gizlilik" } },
+            { "uk", new[] { "Відновити", "Умови", "Конфіденційність" } },
+            { "ur", new[] { "بحال کریں", "شرائط", "رازداری" } },
+            { "vi", new[] { "Khôi phục", "Điều khoản", "Quyền riêng tư" } },
+            { "zh", new[] { "恢复购买", "条款", "隐私" } },
+            { "zh-Hant", new[] { "恢復購買", "條款", "隱私" } },
+        };
     }
 }

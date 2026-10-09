@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Unity IAP 5 `Order` bridge.** `RevnixUnityIap.Register(client, order)` /
+  `InputFrom(order)` (com.unity.purchasing 5.0.0+, define
+  `REVNIX_UNITY_IAP_5`) sends the StoreKit 2 JWS
+  (`Order.Info.Apple.jwsRepresentation`) as `SignedTransactionInfo`, so iOS
+  purchases are verified immediately instead of landing provisional. The
+  4.x `Product` overloads are unchanged.
 - **`SetPushToken`.** `RevnixSdk.Client.SetPushToken(token)` registers the
   device push token for uninstall measurement (ios/android only),
   fire-and-forget, deduped per customer+token. (MS1)

@@ -152,7 +152,7 @@ namespace Revnix.Tests
             var client = new RevnixClient(config);
 
             RevnixAttribution verdict = null;
-            Assert.DoesNotThrowAsync(async () => verdict = await client.GetAttribution());
+            Assert.DoesNotThrow(() => verdict = client.GetAttribution().GetAwaiter().GetResult());
 
             Assert.IsNotNull(verdict);
             Assert.IsNotNull(config.Storage.Get("revnix.attribution"));

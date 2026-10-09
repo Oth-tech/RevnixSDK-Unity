@@ -181,8 +181,8 @@ namespace Revnix.Tests
             };
             var client = new RevnixClient(config);
 
-            Assert.DoesNotThrowAsync(async () =>
-                await client.HandleInstallReferrer("utm_source=instagram"));
+            Assert.DoesNotThrow(() =>
+                client.HandleInstallReferrer("utm_source=instagram").GetAwaiter().GetResult());
         }
 
         [Test]

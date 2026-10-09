@@ -22,7 +22,7 @@ namespace Revnix
     /// </summary>
     public sealed class RevnixClient
     {
-        public const string SdkVersion = "0.3.0";
+        public const string SdkVersion = "1.5.0";
 
         private const long ExpiryGraceMs = 3L * 24 * 3600 * 1000;
         private const long RollbackToleranceMs = 5L * 60 * 1000;

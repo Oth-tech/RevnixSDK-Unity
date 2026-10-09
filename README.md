@@ -1,422 +1,189 @@
-# Revnix Unity SDK (`com.revnix.sdk`)
+<p align="center">
+  <a href="https://www.revnix.io"><img src="https://www.revnix.io/sdk/logo.png" width="360" alt="Revnix"></a>
+</p>
 
-[Revnix](https://revnix.io) subscriptions and entitlements for Unity, the same client contract as `revnix-react`, `revnix-swift`, `revnix-kotlin`,
-and `revnix_flutter`, ported to C#:
+<h1 align="center">Subscriptions, Paywalls and Attribution<br>for Your Unity Game</h1>
 
-- **Offline-resilient entitlements**: network-first reads; transient
-  failures serve the cached snapshot flagged `Stale`, deliberate rejections
-  (401/403/404/409) always throw, so a kill-switch can never be defeated by a
-  cache. Clock-rollback detection, 3-day expiry grace, 14-day cache ceiling.
-- **One fetch per screen**: soft TTL + in-flight coalescing; a screen full
-  of `IsEntitled` gates costs one request.
-- **Durable purchase registration**: failed registrations queue in
-  PlayerPrefs and drain idempotently on every launch (the server dedupes on
-  the purchase key).
-- **Read-your-writes**: `WaitForEntitlements(seq)` polls until the ledger
-  reflects the purchase, so the unlock is immediate, not eventually.
-- **Placements**: `ResolvePlacement` returns the offering + typed remote
-  paywall config (layout template, copy, review/offer blocks), with an
-  offline fallback to the last resolution.
-- **Paywall UI**: `RevnixPaywallView` renders the published config as
-  runtime-generated UGUI (all nine layout templates, same structure as the
-  revnix-react renderer); no prefabs, no TextMeshPro, no extra dependencies.
-- **A/B experiments**: placements resolve with the customer id, so a
-  running experiment serves a sticky variant per customer;
-  `PlacementResolution.Experiment` carries the assignment (`Key`,
-  `VariantId`) for attribution, null when no experiment applies.
-- **Audience targeting**: `SetAttributes` writes the customer attributes
-  those experiments target, so a mobile-only game can run "US players on
-  4.2+" tests.
-- **Device facts**: `ResolvePlacement` sends platform, OS and app version,
-  locale, currency, model, sandbox, install date and first open as
-  `X-Revnix-Device`, so targeting rules can use them; `SendDeviceFacts = false`
-  disables. Install reports also carry `DeviceKey`
-  (`SystemInfo.deviceUniqueIdentifier`) so the server can flag a reinstall.
-- **Optional Unity IAP bridge**: auto-detected via version defines
-  (`com.unity.purchasing` 4.0.0+); maps a Unity IAP 5 `Order` (5.0.0+) or a
-  purchased `Product` straight to a registration. Only the `Order` path sends
-  the StoreKit 2 JWS, so iOS purchases are verified immediately; the 4.x
-  `Product` path lands Apple purchases provisional until App Store
-  notifications confirm them.
+<p align="center">
+  <a href="https://github.com/Oth-tech/RevnixSDK-Unity/releases"><img src="https://img.shields.io/badge/UPM-com.revnix.sdk-2f6fe0?logo=unity" alt="UPM package"></a>
+  <img src="https://img.shields.io/badge/Unity-2021.3%2B-2f6fe0?logo=unity" alt="Unity 2021.3+">
+  <a href="https://github.com/Oth-tech/RevnixSDK-Unity/blob/main/LICENSE.md"><img src="https://img.shields.io/badge/license-MIT-2f6fe0" alt="license"></a>
+</p>
 
-## Install
+<p align="center">
+  <a href="https://www.revnix.io"><b>Website</b></a> •
+  <a href="https://www.revnix.io/docs/unity"><b>Docs</b></a> •
+  <a href="https://www.revnix.io/docs/unity/reference"><b>API Reference</b></a>
+</p>
 
-Requires Unity 2021.3 or later. Package Manager → *Add package from git URL*:
+![Revnix: subscriptions, paywalls and attribution for mobile apps](https://www.revnix.io/sdk/hero.png)
+
+Revnix SDK makes subscriptions, paywalls and attribution for Unity fast and easy. Unity IAP keeps the store flow; Revnix validates the purchase on the server, unlocks the entitlement and renders your dashboard paywall with plain UGUI. No prefabs, no TextMeshPro, no extra dependencies.
+
+## Table of Contents
+
+- [Why Revnix?](#why-revnix)
+- [Getting Started](#getting-started)
+- [Quick start](#quick-start)
+- [Purchases and entitlements without server code](#purchases-and-entitlements-without-server-code)
+- [Paywalls that update without app releases](#paywalls-that-update-without-app-releases)
+- [A/B tests with a built-in holdout](#ab-tests-with-a-built-in-holdout)
+- [Attribution and deep links](#attribution-and-deep-links)
+- [Real-time analytics for your Unity game](#real-time-analytics-for-your-unity-game)
+- [Platform Support](#platform-support)
+- [Documentation](#documentation)
+- [Migrating from another SDK](#migrating-from-another-sdk)
+- [Support](#support)
+- [License](#license)
+
+## Why Revnix?
+
+- [Unity IAP bridge](https://www.revnix.io/docs/unity/make-purchases). One call registers a Unity IAP order; with Unity IAP 5 the StoreKit 2 proof travels along, so iOS purchases are verified on arrival.
+- [Entitlements that work offline](https://www.revnix.io/docs/unity/check-entitlements). Entitlement checks are cached on device, so a player who paid stays unlocked without a network.
+- [Remote paywalls](https://www.revnix.io/docs/paywall-builder). Design paywalls in the dashboard and ship copy, prices and layout changes without an app release.
+- [A/B tests and holdouts](https://www.revnix.io/docs/ab-tests). Split a placement between variants, target an audience and ship the winner from the dashboard.
+- [Attribution and deep links](https://www.revnix.io/docs/attribution). Install attribution, deferred deep links, Apple Search Ads and MMP forwarding from the same package.
+- [Integrations](https://www.revnix.io/docs/integrations). Send subscription events to analytics and messaging tools, or to your own server through signed webhooks.
+- [Real-time analytics](https://www.revnix.io/docs/analytics). Revenue, MRR, LTV, ROAS, cohorts and funnels, filtered by store, product, channel and campaign.
+
+## Getting Started
+
+In Unity, open **Window → Package Manager → + → Add package from git URL** and paste:
 
 ```
-https://github.com/Oth-tech/RevnixSDK-Unity.git
+https://github.com/Oth-tech/RevnixSDK-Unity.git#v0.4.0
 ```
 
-(or add `"com.revnix.sdk": "https://github.com/Oth-tech/RevnixSDK-Unity.git"`
-to `Packages/manifest.json`.)
+Or add it to `Packages/manifest.json`:
+
+```json
+"com.revnix.sdk": "https://github.com/Oth-tech/RevnixSDK-Unity.git#v0.4.0"
+```
+
+The Unity IAP bridge switches on by itself when `com.unity.purchasing` is in the project. Read the [installation guide](https://www.revnix.io/docs/unity/installation) and [configuration reference](https://www.revnix.io/docs/unity/configuration) to set up the package.
 
 ## Quick start
 
 ```csharp
-using Revnix;
 using Revnix.Unity;
 using Revnix.Unity.IAP;
 
+// 1. Configure once at startup (publishable key only, never rvx_sk_)
 var revnix = RevnixSdk.Configure(
-    "rvx_pk_live_…",                      // publishable key only, never rvx_sk_
-    "https://your-deployment.convex.site");
+    "rvx_pk_live_…",
+    "https://<your-deployment>.convex.site");
 
-// Gate. Never throws; unknown or unreachable means locked.
-if (await revnix.IsEntitled("pro")) { /* … */ }
-
-// Paywall
-var placement = await revnix.ResolvePlacement("main_paywall");
-await revnix.LogPaywallShown(placementKey: "main_paywall");
-
-// With Unity IAP 5 (recommended; carries the iOS JWS proof), in OnPurchasePending:
+// 2. Register a Unity IAP 5 purchase in OnPurchasePending
 var result = await RevnixUnityIap.Register(revnix, order);
 if (result != null) await revnix.WaitForEntitlements(result.Seq);
-// Unity IAP 4.x: RevnixUnityIap.Register(revnix, purchasedProduct) instead.
+
+// 3. Check access anywhere. Never throws; unknown means locked.
+if (await revnix.IsEntitled("pro")) { /* unlock */ }
 ```
 
-`Configure` also drains the purchase retry queue and reports the install. Both are idempotent, and both stay off the critical path.
+Your API key and deployment URL are in the dashboard under Settings. See [API keys](https://www.revnix.io/docs/api-keys).
 
-## Paywall UI
+## Purchases and entitlements without server code
 
-`RevnixPaywallView` (namespace `Revnix.Unity.UI`, its own asmdef) draws the
-placement's published paywall config with runtime-generated UGUI; every
-layout template the dashboard offers, in lockstep with the revnix-react
-renderer. Deliberately zero extra dependencies: no prefabs, no bundled
-assets, legacy `UnityEngine.UI.Text` instead of TextMeshPro. Parent it under
-a Canvas (the scene needs an EventSystem for taps):
+**Unity IAP shows the store sheet. Revnix does everything after it.**
+
+- `RevnixUnityIap.Register(revnix, order)` sends the purchase with its StoreKit 2 proof, so iOS purchases are verified immediately. On Unity IAP 4.x, pass the purchased `Product` instead.
+- `WaitForEntitlements(seq)` waits until the purchase is on the ledger, so the unlock is instant.
+- Entitlements and placements are cached on device, so paid players stay unlocked offline.
+- Failed registrations are queued durably and retried on the next launch.
+- No Unity IAP? Call `RegisterPurchase()` with the store token yourself.
+
+Learn more in [Make purchases](https://www.revnix.io/docs/unity/make-purchases) and [Check entitlements](https://www.revnix.io/docs/unity/check-entitlements).
+
+## Paywalls that update without app releases
+
+![Revnix paywall builder: element tree, background library and a live iPhone preview](https://www.revnix.io/sdk/react-native/paywalls.png)
+
+With the [Revnix paywall builder](https://www.revnix.io/docs/paywall-builder) you design the paywall in the dashboard and render it in your game.
+
+- **Native UGUI renderer**: `RevnixPaywallView.Create` draws the published design under any Canvas, all nine layout templates, no prefabs or bundled assets.
+- **Update without redeploying**: change prices, copy or layout any time; the next placement resolve picks it up.
+- **Implicit placements**: trigger a paywall on install, launch, session start or a deep link from the dashboard; the game only handles `onImplicitPaywall`. See [Implicit placements](https://www.revnix.io/docs/implicit-placements).
+- **Localized**: Restore, Terms and Privacy labels in 43 languages; `RevnixSdk.SetLocale("de")` forces one.
 
 ```csharp
-using Revnix.Unity.UI;
-
 var placement = await revnix.ResolvePlacement("main_paywall");
-var packages = new List<RevnixPaywallPackage>
-{
-    // PriceLabel must be the store's localized price (Unity IAP metadata); // the display must never disagree with the charge.
-    new RevnixPaywallPackage { PackageId = "monthly", Title = "Monthly", PriceLabel = "$4.99/mo" },
-    new RevnixPaywallPackage { PackageId = "yearly",  Title = "Yearly",  PriceLabel = "$39.99/yr" },
-};
-
 var paywall = RevnixPaywallView.Create(canvas.transform, new RevnixPaywallOptions
 {
     Config = placement.Paywall.Config,
     Packages = packages,
     OnPurchase = packageId => StartPurchase(packageId),
-    OnRestore = () => RestorePurchases(),
-    Client = revnix,                  // reports one paywall.viewed per Create
+    Client = revnix,
     PlacementKey = "main_paywall",
-    PaywallId = placement.Paywall.PaywallId,
-});
-
-paywall.SetLoading(true);  // spinner in the CTA while the purchase runs
-paywall.Dismiss();         // tear down after the unlock
-```
-
-`SelectedPackageId` reads the current selection, or set it to drive the
-selection from the app (controlled mode, RN semantics; set null to hand
-control back to the view). Footer links honor the dashboard's footer config;
-an explicit `OnTerms`/`OnPrivacy` handler wins over a config URL, which
-otherwise opens via `Application.OpenURL`.
-
-`RevnixSdk.SetLocale("de")` forces every paywall built afterwards into that
-language (null or empty clears it); `RevnixPaywallOptions.Locale` overrides
-it for one view.
-
-### Reporting the whole life of a display
-
-Passing `Client` reports the impression, and with `OnClose` set
-`RevnixPaywallView` pairs the close for you. Drawing your own paywall, the three calls are yours:
-
-| Call | What it does |
-|---|---|
-| `LogPaywallDisplay(…) → Task<string>` | The impression beacon, returning the `viewId` it minted. Prefer it over `LogPaywallShown` whenever you intend to report the close or an interaction: that id is what pairs the halves of one display. |
-| `LogPaywallClosed(viewId, …)` | Ends that display. Idempotent per view id, so a retry or a double-dismiss cannot count two. Without it a funnel knows how many saw the paywall, not how many left without buying. |
-| `LogPaywallEvent(evt, viewId, …)` | One of six interactions (`Selected`, `PurchaseStarted`, `PurchaseAbandoned`, `PurchaseFailed`, `Restore`, `Error`), i.e. what happened BETWEEN the display and the close. |
-
-The purchase **outcome** is always yours, even with the built-in renderer:
-your app makes the Unity IAP call, so only your app sees whether the sheet was
-cancelled or the store refused the payment.
-
-```csharp
-var viewId = await revnix.LogPaywallDisplay("main_paywall", placement.Paywall.PaywallId);
-
-// From IStoreListener.OnPurchaseFailed.
-public void OnPurchaseFailed(Product product, PurchaseFailureReason reason)
-{
-    var evt = reason == PurchaseFailureReason.UserCancelled
-        ? RevnixPaywallEvent.PurchaseAbandoned
-        : RevnixPaywallEvent.PurchaseFailed;
-    _ = revnix.LogPaywallEvent(evt, viewId, productId: product.definition.id);
-}
-
-await revnix.LogPaywallClosed(viewId, "main_paywall", placement.Paywall.PaywallId);
-```
-
-All of these are fire-and-forget and pure ledger history: over-reporting can
-skew a report, it can never grant or revoke access.
-
-### Implicit placements
-
-Six placements resolve without a `ResolvePlacement` call: `app_install`,
-`app_launch`, `session_start`, `deeplink_open`, `paywall_decline` and
-`transaction_abandon`. Passing `onImplicitPaywall` to `RevnixSdk.Configure`
-turns them on (off by default: no extra requests for the other five
-moments, though `HandleDeepLink` always reports the link it is handed); the
-facade creates a hidden, scene-surviving GameObject whose
-`OnApplicationPause` / `OnApplicationFocus` feed `session_start`, and the SDK
-asks `GET /v1/config` at launch and at each new session, so a game that
-configured none of the six costs that request and nothing else.
-
-```csharp
-var mainThread = System.Threading.SynchronizationContext.Current;
-RevnixSdk.Configure("rvx_pk_live_…", "https://….convex.site",
-    onImplicitPaywall: trigger =>
-        // Background continuation - dispatch before touching the scene.
-        mainThread.Post(_ => ShowPaywall(trigger.Resolution), null));
-
-// deeplink_open is the one moment the SDK cannot see itself:
-if (!string.IsNullOrEmpty(Application.absoluteURL))
-    _ = RevnixSdk.Client.HandleDeepLink(Application.absoluteURL);
-Application.deepLinkActivated += url => _ = RevnixSdk.Client.HandleDeepLink(url);
-```
-
-`Application.absoluteURL` holds the link that launched the closed game;
-`deepLinkActivated` fires for links that arrive while it runs. Run both
-once per launch, where `Configure` runs: `absoluteURL` keeps the latest
-link for the life of the process, so reading it again on a later scene
-load would count the same open twice. From v0.3.0,
-`HandleDeepLink` also ignores a null or empty URL itself.
-
-Set `PlacementKey = trigger.Resolution.PlacementKey` on the paywall options:
-that marks the display as implicit and is what stops a `paywall_decline`
-paywall from firing `paywall_decline` again. A close is a decline: never
-report one for a display that ended in a purchase.
-
-The same `HandleDeepLink` call also recognises the dashboard's QR/link
-preview (`<scheme>://revnix-preview?revnix_preview=<token>`, scanned or
-tapped from the paywall builder): it fetches the draft paywall and hands it
-to `onImplicitPaywall` with `Resolution.PlacementKey == "revnix_preview"`,
-never firing `deeplink_open` or writing to the ledger. Purchases are
-disabled on a preview; a tap logs a warning instead.
-
-### Deferred deep links
-
-A click on a Revnix link sends Android to Google Play with the query string
-as the install referrer, and iOS to the App Store, remembering the click for
-up to an hour. Only a link whose scheme matches the game's configured URL
-scheme is ever returned. Pass `onDeferredDeepLink` to `Configure` to get it,
-delivered at most once per install:
-
-```csharp
-RevnixSdk.Configure("rvx_pk_live_…", "https://….convex.site",
-    onDeferredDeepLink: (url, match) =>
-        mainThread.Post(_ => OpenUrl(url), null));
-```
-
-`RegisterInstall` (fired at startup, install platform reported as
-`"ios"`/`"android"` automatically) can only come back with a `probabilistic`
-match (a same-network click within the last hour), so it can be wrong on a
-shared network. It never carries an install referrer, so it can never answer
-`exact`.
-
-`exact` only ever comes from Android's Play Install Referrer, and reading it
-is manual here, as it is in Flutter and in revnix-capacitor 1.2.3 (only the
-native Android SDK, and Capacitor from the release after 1.2.3, read it for
-you). A Unity game must add
-`implementation 'com.android.installreferrer:installreferrer:2.2'` to its own
-`Assets/Plugins/Android/mainTemplate.gradle`, read the referrer itself, and
-hand the raw string to `RevnixSdk.HandleInstallReferrer(referrer)`, which
-reports it to the server and delivers to the same `onDeferredDeepLink`
-handler. Skip this call on Android and no deferred link (exact or
-probabilistic) ever arrives there; iOS has no referrer to read, so it
-relies on `RegisterInstall`'s probabilistic match alone. Route the URL
-yourself; optionally also pass it to `HandleDeepLink` for `deeplink_open`
-paywall rules.
-
-### Apple Search Ads attribution
-
-iOS only. Like the Play Install Referrer above, reading this is manual here:
-this package ships no `ios/` native layer, so there is nothing here to call
-Apple's `AAAttribution` from. Mint the token yourself in your own native iOS
-plugin and hand it over:
-
-```csharp
-RevnixSdk.HandleAttributionToken(token);
-```
-
-The server resolves it to which Apple Search Ads campaign, if any, drove the
-install. `"resolved"` (a campaign was named) and `"organic"` (Apple answered,
-not an ASA install) are final; `"pending"` means Apple couldn't yet answer (a
-freshly minted token is unregistered on Apple's side for a few seconds) and
-is worth retrying with a fresh token on the next cold start. The facade call
-is fire-and-forget; call `RevnixSdk.Client.HandleAttributionToken(token)`
-directly if you need that verdict to decide whether to retry.
-
-An email link is often wrapped by the sender's click-tracking domain, e.g.
-`https://click.mailchimp.com/track/abc` instead of
-`com.voigu.app://promo?utm_source=email&utm_campaign=summer50`. Unwrap it
-first with `RevnixSdk.ResolveDeepLink(url)`, then route the result yourself
-and pass it to `HandleDeepLink`:
-
-```csharp
-var resolved = await RevnixSdk.ResolveDeepLink(wrappedUrl);
-await RevnixSdk.Client.HandleDeepLink(resolved);
-```
-
-Failure returns the input unchanged rather than throwing, so the result can
-still be an http(s) URL if the chain could not be unwrapped; check its
-scheme before routing.
-
-### Getting the last deep link later
-
-`HandleDeepLink` and a delivered deferred deep link both persist the URL, so
-a game that swallowed the original delivery (e.g. behind login or
-onboarding) can ask for it again at any point:
-
-```csharp
-var last = RevnixSdk.Client.GetLastDeepLink();
-if (last != null) OpenUrl(last.Url);
-```
-
-Returns null when nothing has been recorded yet. Survives relaunch, and is
-not cleared by `Logout`.
-
-### The install-attribution verdict
-
-Which signal the install was matched on, and the campaign facts that came
-with it. Pass `onAttribution` to `Configure` to be told whenever the verdict
-changes (once when the install is first attributed, again on a
-re-attribution, never twice for the same verdict), or ask for it yourself:
-
-```csharp
-RevnixSdk.Configure("rvx_pk_live_…", "https://….convex.site",
-    onAttribution: a => mainThread.Post(_ => Log(a.InstallMatch, a.Campaign), null));
-
-var attribution = await RevnixSdk.Client.GetAttribution();
-if (attribution != null) Log(attribution.InstallMatch, attribution.Campaign);
-```
-
-`InstallMatch` is `"referrer"`, `"click"`, `"impression"` or `"organic"`;
-`AttributedAt` and `ReattributedAt` are unix ms (`ReattributedAt` is 0 when
-the customer was never re-attributed), and `LinkToken`, `ReferrerSource`,
-`MatchSignals`, `Source`, `Medium`, `Campaign`, `Term` and `Content` are null
-when the server sent none. `GetAttribution` returns null when no install has
-been attributed yet (a cold start can ask before its own install report
-lands) and on any failure; it never throws. The SDK only asks for the
-verdict on its own (after the install, install-referrer and Apple Search Ads
-reports) when `onAttribution` is set.
-
-### Ad revenue
-
-Call `LogAdRevenue` from your mediation SDK's paid-event callback (AdMob
-`OnPaidEvent`, AppLovin MAX `OnAdRevenuePaidEvent`). Fire-and-forget: a
-non-finite or zero-or-less `revenue` is dropped with a diagnostic, and the
-optional strings are truncated to 100 characters. It feeds the Return on ad
-spend table, see [Ad revenue](https://revnix.io/docs/ad-revenue):
-
-```csharp
-// from your mediation SDK's paid-event callback
-_ = RevnixSdk.Client.LogAdRevenue(
-    revenue, "USD",
-    network: networkName,
-    mediation: "applovin_max",
-    adUnit: adUnitId,
-    format: "rewarded");
-```
-
-### Custom events
-
-Call `Track` to report a custom in-app event (not a purchase — purchases go
-through `RegisterPurchase`). Fire-and-forget, like `LogAdRevenue`; the event
-name must match `^[a-z0-9_]{1,64}$` or it's dropped with a diagnostic:
-
-```csharp
-_ = RevnixSdk.Client.Track(
-    "level_up",
-    new Dictionary<string, object> { ["level"] = 5 });
-```
-
-### MMP attribution
-
-If you already run an MMP (Adjust, AppsFlyer, Singular, Branch, Kochava,
-Tenjin, Airbridge), call `SetAttribution` from its attribution callback so
-Revnix credits revenue to the right network/campaign. Fire-and-forget, like
-`LogAdRevenue`:
-
-```csharp
-// Adjust's attribution callback
-void OnAttributionChanged(AdjustAttribution attribution)
-{
-    _ = RevnixSdk.Client.SetAttribution(
-        "adjust", attribution.Network,
-        campaign: attribution.Campaign,
-        adGroup: attribution.Adgroup,
-        creative: attribution.Creative);
-}
-
-// AppsFlyer's onConversionDataSuccess
-void OnConversionDataSuccess(Dictionary<string, object> data)
-{
-    if ((string)data["af_status"] == "Organic") return;
-    _ = RevnixSdk.Client.SetAttribution(
-        "appsflyer", (string)data["media_source"],
-        campaign: data.TryGetValue("campaign", out var c) ? (string)c : null,
-        adGroup: data.TryGetValue("af_adset", out var g) ? (string)g : null,
-        creative: data.TryGetValue("af_ad", out var cr) ? (string)cr : null);
-}
-```
-
-### Uninstall measurement
-
-Revnix measures uninstalls the way Adjust/AppsFlyer do: register the
-device's push token from whatever push plugin the game already uses
-(Firebase Messaging on Android, APNs on iOS), and once a day a silent push
-probes it; when the store reports the token dead, the customer gets an
-`app.uninstalled` event:
-
-```csharp
-_ = RevnixSdk.Client.SetPushToken(token);
-```
-
-Fire-and-forget, like `SetAttribution`. Only sends when the device facts
-platform is `ios`/`android` (no-op elsewhere). Requires the game's own push
-setup: Firebase Cloud Messaging on Android, Push Notifications + Background
-Modes → Remote notifications on iOS. See
-[Uninstall measurement](https://revnix.io/docs/uninstall-measurement).
-
-## Targeting an A/B audience
-
-An experiment can be narrowed to an audience: conditions over customer
-attributes. `SetAttributes` supplies the facts those conditions read:
-
-```csharp
-await revnix.SetAttributes(new Dictionary<string, object> {
-    ["country"] = "US",
-    ["app_version"] = "4.2.0",
-    ["levels_completed"] = 12,
-    ["stale_key"] = null,          // null deletes the key
 });
 ```
 
-Values must be a string, a number, or null, anything else throws
-`ArgumentException` before a request goes out. This awaits the write and
-throws on failure, unlike the fire-and-forget beacons, because the next
-`ResolvePlacement` may depend on it. Set an audience's attributes *before* the
-first resolve on a covered placement; eligibility is checked at that resolve.
-`email` and `username` are reserved (secret key, from your own backend), and
-an attribute your backend already set cannot be changed from a device; both
-reject the whole batch rather than applying part of it.
+Learn more in [Show paywalls](https://www.revnix.io/docs/unity/show-paywalls) and [Placements](https://www.revnix.io/docs/placements).
 
-## Design notes
+## A/B tests with a built-in holdout
 
-- The resilience policy is a **product contract** shared by every Revnix SDK;
-  `revnix-sdk`'s `resilience.test.ts` is the behavioral spec. Don't "fix"
-  policy here, change the spec first.
-- The core (`Runtime/Core`) is engine-free C# with injected transport,
-  storage, and clock; it compiles against .NET and is verified off-device.
-  Unity specifics live in `Runtime/Unity` (UnityWebRequest, PlayerPrefs).
-- Purchases are **claims**: Google purchase tokens and Apple transaction ids
-  register without device-side proof and land `Provisional` until the server
-  corroborates with the store (RTDN / App Store Server API). Nothing about
-  that is Unity-specific; it is how the platform works.
-- Main thread: call the SDK from the main thread (UnityWebRequest's
-  requirement). Awaited continuations resume on Unity's SynchronizationContext.
+![Revnix A/B test results with a winner and credible intervals](https://www.revnix.io/sdk/react-native/ab-test.png)
+
+- Split a placement's traffic between offering and paywall variants; each player gets a sticky variant.
+- Add a **holdout** variant that shows no paywall at all, to measure what the paywall is really worth.
+- Target an audience with `SetAttributes`, for example "US players on 4.2+". See [Audiences](https://www.revnix.io/docs/audiences).
+- Ship the winner from the dashboard; the game needs no change.
+
+Learn more in [A/B tests](https://www.revnix.io/docs/ab-tests).
+
+## Attribution and deep links
+
+![Revnix MRR by country, last 90 days](https://www.revnix.io/sdk/react-native/attribution.png)
+
+- **Install attribution** from Revnix links, read back with `GetAttribution()`. See [Attribution](https://www.revnix.io/docs/attribution).
+- **Deferred deep links** resolve on first launch through `onDeferredDeepLink`. See [Deferred deep links](https://www.revnix.io/docs/deferred-deep-links).
+- **Apple Search Ads** through `HandleAttributionToken`. See [Apple Search Ads](https://www.revnix.io/docs/apple-search-ads).
+- **MMP forwarding**, **ad revenue** and **uninstall measurement**. See [MMP attribution](https://www.revnix.io/docs/mmp-attribution), [Ad revenue](https://www.revnix.io/docs/ad-revenue) and [Uninstall measurement](https://www.revnix.io/docs/uninstall-measurement).
+
+## Real-time analytics for your Unity game
+
+![Revnix overview: active subscriptions, revenue and MRR over 90 days](https://www.revnix.io/sdk/react-native/analytics.png)
+
+- Revenue, MRR, ARR, ARPU, LTV and ROAS, updated from the ledger as purchases arrive.
+- Cohorts, retention, funnels and predicted LTV. See [Analytics](https://www.revnix.io/docs/analytics).
+- Custom in-game events with `Track("level_complete")`.
+- Saved reports, alerts and a REST API. See [Reports](https://www.revnix.io/docs/reports) and [REST API](https://www.revnix.io/docs/rest-api).
+
+## Platform Support
+
+| Requirement | Version |
+| --- | --- |
+| Unity | 2021.3 and later |
+| Unity IAP (optional) | 5.0+ for verified iOS purchases, 4.0+ supported |
+| Purchases | iOS (App Store) and Android (Google Play) |
+| Entitlements, placements, paywalls | Every platform Unity builds for, including the Editor |
+
+Call the SDK from the main thread. Awaited calls resume on Unity's main thread.
+
+## Documentation
+
+- [Overview](https://www.revnix.io/docs/unity)
+- [Installation](https://www.revnix.io/docs/unity/installation)
+- [Configuration](https://www.revnix.io/docs/unity/configuration)
+- [Make purchases](https://www.revnix.io/docs/unity/make-purchases)
+- [Check entitlements](https://www.revnix.io/docs/unity/check-entitlements)
+- [Show paywalls](https://www.revnix.io/docs/unity/show-paywalls)
+- [API reference](https://www.revnix.io/docs/unity/reference)
+
+Revnix also ships SDKs for [React Native](https://www.revnix.io/docs/react-native), [iOS](https://www.revnix.io/docs/ios), [Android](https://www.revnix.io/docs/android), [Flutter](https://www.revnix.io/docs/flutter) and [Capacitor](https://www.revnix.io/docs/capacitor).
+
+## Migrating from another SDK
+
+Moving from Adapty or RevenueCat? Revnix imports your customers and purchase history.
+
+- [Migrate from Adapty](https://www.revnix.io/docs/migrate-from-adapty)
+- [Migrate from RevenueCat](https://www.revnix.io/docs/migrate-from-revenuecat)
+
+## Support
+
+- Email [support@revnix.io](mailto:support@revnix.io) with questions, bugs or feature requests.
+- Check the [status page](https://www.revnix.io/status) for incidents.
+
+## License
+
+Revnix SDK is available under the MIT license. See [LICENSE](https://github.com/Oth-tech/RevnixSDK-Unity/blob/main/LICENSE.md) for details.

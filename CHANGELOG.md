@@ -2,7 +2,9 @@
 
 All notable changes to this package. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.4.0
+## 1.5.0
+
+The Unity SDK now shares its version number with the other Revnix SDKs (iOS, React Native, Capacitor). This release follows 0.3.0.
 
 ### Added
 

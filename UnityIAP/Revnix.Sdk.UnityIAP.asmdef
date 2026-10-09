@@ -17,6 +17,11 @@
             "name": "com.unity.purchasing",
             "expression": "4.0.0",
             "define": "REVNIX_UNITY_IAP"
+        },
+        {
+            "name": "com.unity.purchasing",
+            "expression": "5.0.0",
+            "define": "REVNIX_UNITY_IAP_5"
         }
     ],
     "noEngineReferences": false

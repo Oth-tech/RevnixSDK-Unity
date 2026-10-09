@@ -33,8 +33,11 @@ and `revnix_flutter`, ported to C#:
   disables. Install reports also carry `DeviceKey`
   (`SystemInfo.deviceUniqueIdentifier`) so the server can flag a reinstall.
 - **Optional Unity IAP bridge**: auto-detected via version defines
-  (`com.unity.purchasing` 4.0.0+); maps a purchased `Product` straight to a
-  registration.
+  (`com.unity.purchasing` 4.0.0+); maps a Unity IAP 5 `Order` (5.0.0+) or a
+  purchased `Product` straight to a registration. Only the `Order` path sends
+  the StoreKit 2 JWS, so iOS purchases are verified immediately; the 4.x
+  `Product` path lands Apple purchases provisional until App Store
+  notifications confirm them.
 
 ## Install
 
@@ -65,9 +68,10 @@ if (await revnix.IsEntitled("pro")) { /* … */ }
 var placement = await revnix.ResolvePlacement("main_paywall");
 await revnix.LogPaywallShown(placementKey: "main_paywall");
 
-// With Unity IAP (com.unity.purchasing in the project):
-var result = await RevnixUnityIap.Register(revnix, purchasedProduct);
+// With Unity IAP 5 (recommended; carries the iOS JWS proof), in OnPurchasePending:
+var result = await RevnixUnityIap.Register(revnix, order);
 if (result != null) await revnix.WaitForEntitlements(result.Seq);
+// Unity IAP 4.x: RevnixUnityIap.Register(revnix, purchasedProduct) instead.
 ```
 
 `Configure` also drains the purchase retry queue and reports the install. Both are idempotent, and both stay off the critical path.

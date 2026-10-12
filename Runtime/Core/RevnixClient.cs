@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
@@ -27,6 +29,15 @@ namespace Revnix
         private const long ExpiryGraceMs = 3L * 24 * 3600 * 1000;
         private const long RollbackToleranceMs = 5L * 60 * 1000;
         private const int CacheCustomers = 4;
+        private const int EventQueueCap = 1000;
+        private const int EventBatchSize = 100;
+        private const int EventFlushThreshold = 20;
+        private const int EventFlushDelayMs = 10_000;
+        private const long EventRetryHoldMs = 30_000;
+        private const long PlacementFreshMs = 24L * 3600 * 1000;
+        private const int CachedEntitlementsTimeoutMs = 3000;
+        private const int PurchaseQueueCap = 100;
+        private const long PurchaseMaxAgeMs = 30L * 24 * 3600 * 1000;
 
         private static readonly Regex PreviewTokenRe =
             new Regex(@"[?&]revnix_preview=([0-9a-f]{64})(?:[&#]|$)");
@@ -43,11 +54,16 @@ namespace Revnix
         private const string KeyLastPushToken = "revnix.lastPushToken";
         private const string KeySessionStartedAt = "revnix.sessionStartedAt";
         private const string KeyLastBackgroundAt = "revnix.lastBackgroundAt";
+        private const string KeyEventQueue = "revnix.eventQueue";
+        private const string KeyPlacementsInvalidatedAt = "revnix.placementsInvalidatedAt";
 
         private readonly RevnixConfig _config;
         private readonly object _lock = new object();
         private readonly Random _random = new Random();
         private Task<CustomerEntitlements> _inflight;
+        private Task _eventFlush;
+        private bool _eventTimerArmed;
+        private long _eventRetryAt;
         private int _bgFailures;
         // REV-268: the encoded X-Revnix-Device value, built on the first
         // resolve and kept for the client's lifetime (so firstOpen holds for
@@ -108,6 +124,21 @@ namespace Revnix
             if (string.IsNullOrEmpty(config.BaseUrl)) throw new ArgumentException("BaseUrl is required");
             if (config.Http == null) throw new ArgumentException("Http transport is required");
             _config = config;
+            SubscribeLifecycle();
+            if (config.Storage.Get(KeyEventQueue) != null) StartEventFlush();
+        }
+
+        private void SubscribeLifecycle()
+        {
+            if (_config.Lifecycle == null || _lifecycleCancel != null) return;
+            try
+            {
+                _lifecycleCancel = _config.Lifecycle.OnStateChange(OnAppState);
+            }
+            catch (Exception err)
+            {
+                Diagnostic("lifecycleSubscribe", err.Message);
+            }
         }
 
         // ── Implicit placements (REV-272) ────────────────────────────────────
@@ -132,22 +163,7 @@ namespace Revnix
             if (!ImplicitEnabled || _implicitStarted) return;
             _implicitStarted = true;
 
-            // Subscribed BEFORE the batch, which can take a full network
-            // timeout when offline: a player who backgrounds the game during
-            // that window and comes back an hour later is a session, and
-            // missing the background transition would lose it.
-            if (_config.Lifecycle != null)
-            {
-                try
-                {
-                    _lifecycleCancel = _config.Lifecycle.OnStateChange(OnAppState);
-                }
-                catch (Exception err)
-                {
-                    // A broken adapter costs session detection, not the client.
-                    Diagnostic("lifecycleSubscribe", err.Message);
-                }
-            }
+            SubscribeLifecycle();
 
             // CustomerId() is what sets _mintedThisLaunch, so it runs first.
             CustomerId();
@@ -397,7 +413,8 @@ namespace Revnix
         {
             try
             {
-                if (_implicitStopped) return;
+                if (state == RevnixAppState.Background) _ = StartEventFlush();
+                if (!_implicitStarted || _implicitStopped) return;
                 if (state == RevnixAppState.Background)
                 {
                     // First report wins: a platform that repeats "background"
@@ -673,9 +690,11 @@ namespace Revnix
         /// <summary>Network-only read — no TTL shortcut, no cache fallback.
         /// Throws on any failure. The read-your-writes poll needs a genuinely
         /// fresh cursor.</summary>
-        private async Task<CustomerEntitlements> FetchFreshEntitlements(string cid, long nowMs)
+        private async Task<CustomerEntitlements> FetchFreshEntitlements(
+            string cid, long nowMs, int? timeoutMs = null)
         {
-            var raw = await Request("GET", new[] { "v1", "customers", cid, "entitlements" });
+            var raw = await Request(
+                "GET", new[] { "v1", "customers", cid, "entitlements" }, timeoutMs: timeoutMs);
             var snapshot = DecodeEntitlements(raw);
             snapshot.Stale = false;
             snapshot.FetchedAt = nowMs;
@@ -685,9 +704,10 @@ namespace Revnix
 
         private async Task<CustomerEntitlements> FetchEntitlements(string cid, long nowMs, bool rolledBack)
         {
+            var timeoutMs = CacheEntryFor(cid) == null ? (int?)null : CachedEntitlementsTimeoutMs;
             try
             {
-                return await FetchFreshEntitlements(cid, nowMs);
+                return await FetchFreshEntitlements(cid, nowMs, timeoutMs);
             }
             catch (RevnixException err)
             {
@@ -807,6 +827,7 @@ namespace Revnix
                     _config.Storage.Set(KeyCustomerId, result.CustomerId);
                 }
                 RemoveQueued(QueueKey(input));
+                MarkPlacementsInvalidated();
                 return result;
             }
             catch (RevnixException err)
@@ -822,14 +843,28 @@ namespace Revnix
         public async Task<int> RetryPendingPurchases()
         {
             var cid = CustomerId();
-            var delivered = 0;
-            foreach (var item in QueuedItems())
+            var now = _config.Now();
+            var items = QueuedItems();
+            if (items.Exists(item => item.QueuedAt == null))
             {
+                foreach (var item in items) item.QueuedAt = item.QueuedAt ?? now;
+                PersistQueue(items);
+            }
+            var delivered = 0;
+            foreach (var item in items)
+            {
+                if (now - item.QueuedAt > PurchaseMaxAgeMs)
+                {
+                    RemoveQueued(item.Key);
+                    Diagnostic("retryPendingPurchases", "expired " + item.Key);
+                    continue;
+                }
                 try
                 {
                     await PostPurchase(item.ToInput(), cid);
                     RemoveQueued(item.Key);
                     delivered += 1;
+                    MarkPlacementsInvalidated();
                 }
                 catch (RevnixException err)
                 {
@@ -872,11 +907,45 @@ namespace Revnix
 
         // ── Placements & telemetry ───────────────────────────────────────────
 
+        /// <summary>Served from a cache under 24 h old when there is one,
+        /// refreshed in the background; otherwise network first, with a cache
+        /// of any age as the fallback on a transient failure. A deliberate
+        /// rejection seen by the background refresh drops the cache, so the
+        /// next resolve throws it.</summary>
         public async Task<PlacementResolution> ResolvePlacement(string key)
         {
+            var fresh = FreshCachedPlacement(key);
+            if (fresh != null)
+            {
+                _ = RefreshPlacement(key);
+                return fresh;
+            }
+            try
+            {
+                return await FetchPlacement(key);
+            }
+            catch (RevnixException err)
+            {
+                if (!err.IsRetryable) throw;
+                var cached = CachedPlacement(key);
+                if (cached == null) throw;
+                return cached;
+            }
+        }
+
+        /// <summary>Fetch these placements now so the next
+        /// <see cref="ResolvePlacement"/> answers from the cache. Never throws;
+        /// failures report to <see cref="RevnixConfig.OnDiagnostic"/>.</summary>
+        public Task Preload(IEnumerable<string> placementKeys)
+            => Task.WhenAll(placementKeys.Select(RefreshPlacement));
+
+        private async Task<PlacementResolution> FetchPlacement(string key)
+        {
+            var cid = CustomerId();
+            var fetchedAt = _config.Now();
             // REV-219: the customer id lets the server assign a sticky
             // experiment variant; older servers ignore the parameter.
-            var query = new Dictionary<string, string> { ["customer"] = CustomerId() };
+            var query = new Dictionary<string, string> { ["customer"] = cid };
             // REV-268: the device facts ride along so targeting rules see THIS
             // device on THIS request, and the server stores them as device.*
             // attributes. Older servers ignore the header.
@@ -884,27 +953,78 @@ namespace Revnix
             var headers = header == null
                 ? null
                 : new Dictionary<string, string> { ["X-Revnix-Device"] = header };
+            var raw = await Request("GET", new[] { "v1", "placements", key, "offering" }, null, query, headers);
+            var resolution = Decode(raw, PlacementResolution.FromJson);
+            _config.Storage.Set(PlacementKey(key), raw);
+            _config.Storage.Set(PlacementStampKey(key), RevnixJson.Serialize(new Dictionary<string, object>
+            {
+                ["customerId"] = cid,
+                ["fetchedAt"] = fetchedAt,
+            }));
+            return resolution;
+        }
+
+        private async Task<PlacementResolution> RefreshPlacement(string key)
+        {
             try
             {
-                var raw = await Request("GET", new[] { "v1", "placements", key, "offering" }, null, query, headers);
-                var resolution = Decode(raw, PlacementResolution.FromJson);
-                _config.Storage.Set(PlacementKey(key), raw);
-                return resolution;
+                return await FetchPlacement(key);
             }
-            catch (RevnixException err)
+            catch (Exception err)
             {
-                if (!err.IsRetryable) throw;
-                var cached = _config.Storage.Get(PlacementKey(key));
-                if (cached == null) throw;
-                try
+                _bgFailures += 1;
+                if (err is RevnixException revnixErr && !revnixErr.IsRetryable)
                 {
-                    return Decode(cached, PlacementResolution.FromJson);
+                    _config.Storage.Remove(PlacementKey(key));
+                    _config.Storage.Remove(PlacementStampKey(key));
                 }
-                catch (RevnixException)
-                {
-                    throw err;
-                }
+                Diagnostic("resolvePlacement", err.Message);
+                return null;
             }
+        }
+
+        private PlacementResolution FreshCachedPlacement(string key)
+        {
+            var raw = _config.Storage.Get(PlacementStampKey(key));
+            if (raw == null) return null;
+            Dictionary<string, object> stamp;
+            try
+            {
+                stamp = RevnixJson.ParseObject(raw);
+            }
+            catch (FormatException)
+            {
+                return null;
+            }
+            var fetchedAt = RevnixJson.GetLong(stamp, "fetchedAt");
+            var age = _config.Now() - fetchedAt;
+            long.TryParse(_config.Storage.Get(KeyPlacementsInvalidatedAt), out var invalidatedAt);
+            if (RevnixJson.GetString(stamp, "customerId") != CustomerId() ||
+                fetchedAt <= invalidatedAt || age < 0 || age > PlacementFreshMs)
+            {
+                return null;
+            }
+            return CachedPlacement(key);
+        }
+
+        private PlacementResolution CachedPlacement(string key)
+        {
+            var cached = _config.Storage.Get(PlacementKey(key));
+            if (cached == null) return null;
+            try
+            {
+                return Decode(cached, PlacementResolution.FromJson);
+            }
+            catch (RevnixException)
+            {
+                return null;
+            }
+        }
+
+        private void MarkPlacementsInvalidated()
+        {
+            _config.Storage.Set(
+                KeyPlacementsInvalidatedAt, _config.Now().ToString(CultureInfo.InvariantCulture));
         }
 
         /// <summary>REV-268: assemble the device facts once. installedAt is the
@@ -1206,12 +1326,12 @@ namespace Revnix
             if (placementKey == RevnixImplicitPlacements.PreviewPlacementKey) return;
             var body = new Dictionary<string, object>
             {
-                ["customerId"] = CustomerId(),
                 ["viewId"] = viewId ?? "",
                 ["event"] = RevnixPaywallEventNames.Wire(evt),
+                ["eventId"] = eventId ?? viewId ?? "",
+                ["occurredAt"] = _config.Now(),
                 ["sdkVersion"] = SdkVersion,
             };
-            if (eventId != null) body["eventId"] = eventId;
             if (placementKey != null) body["placementKey"] = placementKey;
             if (paywallId != null) body["paywallId"] = paywallId;
             if (productId != null) body["productId"] = productId;
@@ -1222,15 +1342,7 @@ namespace Revnix
             {
                 body["message"] = message.Length > 1024 ? message.Substring(0, 1024) : message;
             }
-            try
-            {
-                await Request("POST", new[] { "v1", "paywalls", "events" }, body);
-            }
-            catch (RevnixException err)
-            {
-                _bgFailures += 1;
-                Diagnostic("logPaywallEvent", err.Message);
-            }
+            EnqueueEvent("/v1/paywalls/events", body);
             // REV-272: backing out of the store sheet is the
             // `transaction_abandon` moment. Reuses the
             // paywall.purchase_abandoned just reported.
@@ -1286,7 +1398,7 @@ namespace Revnix
 
         /// <summary>Report a custom in-app event (not a purchase; purchases go through
         /// <see cref="RegisterPurchase"/>). Fire-and-forget.</summary>
-        public async Task Track(
+        public Task Track(
             string eventName,
             IDictionary<string, object> properties = null,
             string eventId = null)
@@ -1294,11 +1406,10 @@ namespace Revnix
             if (eventName == null || !TrackEventNameRe.IsMatch(eventName))
             {
                 Diagnostic("track", "event must match ^[a-z0-9_]{1,64}$");
-                return;
+                return Task.CompletedTask;
             }
             var body = new Dictionary<string, object>
             {
-                ["customerId"] = CustomerId(),
                 ["event"] = eventName,
                 ["eventId"] = eventId ?? Guid.NewGuid().ToString("D").ToLowerInvariant(),
                 ["occurredAt"] = _config.Now(),
@@ -1319,14 +1430,213 @@ namespace Revnix
                 }
                 body["properties"] = props;
             }
+            EnqueueEvent("/v1/events", body);
+            return Task.CompletedTask;
+        }
+
+        /// <summary>Send every queued <see cref="Track"/> and
+        /// <see cref="LogPaywallEvent"/> event now. Events are otherwise sent
+        /// in batches: at 20 queued, 10 s after the first, when the app goes
+        /// to the background, and on the next launch. Never throws; a
+        /// transient failure keeps the events for the next flush.</summary>
+        public async Task FlushEvents()
+        {
+            Task running;
+            lock (_lock) running = _eventFlush;
+            if (running != null) await running;
+            await StartEventFlush();
+        }
+
+        // ponytail: the whole queue is re-serialized per event; keep it in memory if 1000-item offline queues show up in profiles.
+        private List<Dictionary<string, object>> QueuedEvents()
+        {
+            var raw = _config.Storage.Get(KeyEventQueue);
+            var result = new List<Dictionary<string, object>>();
+            if (raw == null) return result;
+            object parsed;
             try
             {
-                await Request("POST", new[] { "v1", "events" }, body);
+                parsed = RevnixJson.Parse(raw);
             }
-            catch (RevnixException err)
+            catch (FormatException)
+            {
+                return result;
+            }
+            if (parsed is List<object> list)
+            {
+                foreach (var item in list)
+                {
+                    if (item is Dictionary<string, object> map) result.Add(map);
+                }
+            }
+            return result;
+        }
+
+        private void PersistEvents(List<Dictionary<string, object>> events)
+        {
+            if (events.Count == 0)
+            {
+                _config.Storage.Remove(KeyEventQueue);
+                return;
+            }
+            _config.Storage.Set(KeyEventQueue, RevnixJson.Serialize(new List<object>(events)));
+        }
+
+        private void EnqueueEvent(string path, Dictionary<string, object> body)
+        {
+            bool dropped;
+            int count;
+            try
+            {
+                body["customerId"] = CustomerId();
+                lock (_lock)
+                {
+                    var events = QueuedEvents();
+                    dropped = events.Count >= EventQueueCap;
+                    if (dropped) events.RemoveRange(0, events.Count - EventQueueCap + 1);
+                    events.Add(new Dictionary<string, object> { ["path"] = path, ["body"] = body });
+                    PersistEvents(events);
+                    count = events.Count;
+                }
+            }
+            catch (Exception err)
+            {
+                Diagnostic("eventQueue", err.Message);
+                return;
+            }
+            if (dropped) Diagnostic("eventQueue", "queue full, dropped the oldest event");
+            if (count >= EventFlushThreshold) _ = StartEventFlush();
+            else ArmEventTimer(EventFlushDelayMs);
+        }
+
+        private void ArmEventTimer(long delayMs)
+        {
+            lock (_lock)
+            {
+                if (_eventTimerArmed) return;
+                _eventTimerArmed = true;
+            }
+            _ = FireEventTimer(delayMs);
+        }
+
+        private async Task FireEventTimer(long delayMs)
+        {
+            await _config.Delay((int)Math.Min(delayMs, int.MaxValue));
+            lock (_lock) _eventTimerArmed = false;
+            await StartEventFlush();
+        }
+
+        private Task StartEventFlush()
+        {
+            TaskCompletionSource<bool> done = null;
+            long hold;
+            lock (_lock)
+            {
+                if (_eventFlush != null) return _eventFlush;
+                hold = _eventRetryAt - _config.Now();
+                if (hold <= 0)
+                {
+                    done = new TaskCompletionSource<bool>();
+                    _eventFlush = done.Task;
+                }
+            }
+            if (done == null)
+            {
+                ArmEventTimer(hold);
+                return Task.CompletedTask;
+            }
+            _ = RunEventFlush(done);
+            return done.Task;
+        }
+
+        private async Task RunEventFlush(TaskCompletionSource<bool> done)
+        {
+            try
+            {
+                foreach (var group in QueuedEvents().GroupBy(e => RevnixJson.GetString(e, "path", "")))
+                {
+                    var events = group.ToList();
+                    for (var start = 0; start < events.Count; start += EventBatchSize)
+                    {
+                        var chunk = events.GetRange(start, Math.Min(EventBatchSize, events.Count - start));
+                        if (await KeptForRetry(group.Key, chunk)) return;
+                    }
+                }
+            }
+            catch (Exception err)
+            {
+                Diagnostic("eventQueue", err.Message);
+            }
+            finally
+            {
+                lock (_lock) _eventFlush = null;
+                done.SetResult(true);
+            }
+        }
+
+        private async Task<bool> KeptForRetry(string path, List<Dictionary<string, object>> chunk)
+        {
+            try
+            {
+                var bodies = chunk.ConvertAll(e => (object)RevnixJson.GetObject(e, "body"));
+                var raw = await Request(
+                    "POST",
+                    path.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries),
+                    new Dictionary<string, object> { ["events"] = bodies });
+                var results = Decode(raw, BatchResults);
+                for (var i = 0; i < Math.Min(chunk.Count, results.Count); i++)
+                {
+                    var status = RevnixJson.GetLong(results[i], "status");
+                    if (status < 400) continue;
+                    var eventId = RevnixJson.GetString(RevnixJson.GetObject(chunk[i], "body"), "eventId");
+                    Diagnostic("eventQueue", "dropped " + path + " event " + eventId + ": " + status + " " +
+                        RevnixJson.GetString(results[i], "error", ""));
+                }
+                RemoveEvents(chunk);
+                return false;
+            }
+            catch (RevnixException err) when (err.IsRetryable)
             {
                 _bgFailures += 1;
-                Diagnostic("track", err.Message);
+                lock (_lock) _eventRetryAt = _config.Now() + EventRetryHoldMs;
+                Diagnostic("eventQueue", "kept " + chunk.Count + " events: " + err.Message);
+                return true;
+            }
+            catch (Exception err)
+            {
+                _bgFailures += 1;
+                RemoveEvents(chunk);
+                Diagnostic("eventQueue", "dropped " + chunk.Count + " events: " + err.Message);
+                return false;
+            }
+        }
+
+        private static List<Dictionary<string, object>> BatchResults(Dictionary<string, object> map)
+        {
+            if (!(map.TryGetValue("results", out var value) && value is List<object> list))
+            {
+                throw new RevnixBadResponseException();
+            }
+            var results = new List<Dictionary<string, object>>();
+            foreach (var item in list)
+            {
+                if (!(item is Dictionary<string, object> result && result.TryGetValue("status", out var status) && status is long))
+                {
+                    throw new RevnixBadResponseException();
+                }
+                results.Add(result);
+            }
+            return results;
+        }
+
+        private void RemoveEvents(List<Dictionary<string, object>> sent)
+        {
+            var sentJson = new HashSet<string>(sent.Select(RevnixJson.Serialize));
+            lock (_lock)
+            {
+                var events = QueuedEvents();
+                events.RemoveAll(e => sentJson.Contains(RevnixJson.Serialize(e)));
+                PersistEvents(events);
             }
         }
 
@@ -1429,11 +1739,12 @@ namespace Revnix
             var body = new Dictionary<string, object> { ["attributes"] = attributes };
             await Request("POST",
                 new[] { "v1", "customers", CustomerId(), "attributes" }, body);
+            MarkPlacementsInvalidated();
         }
 
         private async Task<string> Request(string method, string[] segments,
             Dictionary<string, object> body = null, Dictionary<string, string> query = null,
-            Dictionary<string, string> extraHeaders = null)
+            Dictionary<string, string> extraHeaders = null, int? timeoutMs = null)
         {
             var url = BuildUrl(segments, query);
             var headers = new Dictionary<string, string>
@@ -1455,7 +1766,7 @@ namespace Revnix
 
             var jsonBody = body != null ? RevnixJson.Serialize(body) : null;
             var response = await _config.Http.Send(
-                method, url, jsonBody, headers, (int)_config.Timeout.TotalMilliseconds);
+                method, url, jsonBody, headers, timeoutMs ?? (int)_config.Timeout.TotalMilliseconds);
 
             if (response.Status < 200 || response.Status >= 300)
             {
@@ -1542,6 +1853,7 @@ namespace Revnix
             public long? ExpiresAt;
             public string SignedTransactionInfo;
             public Dictionary<string, object> RawPayload;
+            public long? QueuedAt;
 
             public RegisterPurchaseInput ToInput() => new RegisterPurchaseInput
             {
@@ -1558,6 +1870,7 @@ namespace Revnix
 
         private static string CacheKey(string cid) => "revnix.ent." + cid;
         private static string PlacementKey(string key) => "revnix.placement." + key;
+        private static string PlacementStampKey(string key) => "revnix.placementAt." + key;
         private static string InstallReportedKey(string cid) => "revnix.installReported." + cid;
 
         /// <summary>Persist the high-water wall clock; report whether the clock
@@ -1665,6 +1978,7 @@ namespace Revnix
                             ExpiresAt = RevnixJson.GetNullableLong(map, "expiresAt"),
                             SignedTransactionInfo = RevnixJson.GetString(map, "signedTransactionInfo"),
                             RawPayload = RevnixJson.GetObject(map, "rawPayload"),
+                            QueuedAt = RevnixJson.GetNullableLong(map, "queuedAt"),
                         });
                     }
                 }
@@ -1693,6 +2007,7 @@ namespace Revnix
                 if (item.ExpiresAt.HasValue) map["expiresAt"] = item.ExpiresAt.Value;
                 if (item.SignedTransactionInfo != null) map["signedTransactionInfo"] = item.SignedTransactionInfo;
                 if (item.RawPayload != null) map["rawPayload"] = item.RawPayload;
+                if (item.QueuedAt.HasValue) map["queuedAt"] = item.QueuedAt.Value;
                 list.Add(map);
             }
             _config.Storage.Set(KeyQueue, RevnixJson.Serialize(list));
@@ -1706,6 +2021,11 @@ namespace Revnix
             {
                 if (item.Key == key) return;
             }
+            while (items.Count >= PurchaseQueueCap)
+            {
+                Diagnostic("registerPurchase", "queue full, dropped " + items[0].Key);
+                items.RemoveAt(0);
+            }
             items.Add(new QueuedPurchase
             {
                 Key = key,
@@ -1717,6 +2037,7 @@ namespace Revnix
                 ExpiresAt = input.ExpiresAt,
                 SignedTransactionInfo = input.SignedTransactionInfo,
                 RawPayload = input.RawPayload,
+                QueuedAt = _config.Now(),
             });
             PersistQueue(items);
         }

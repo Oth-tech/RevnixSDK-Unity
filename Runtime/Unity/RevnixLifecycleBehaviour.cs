@@ -4,7 +4,8 @@ using UnityEngine;
 namespace Revnix.Unity
 {
     /// <summary>
-    /// REV-272: foreground detection for implicit placements.
+    /// Pause/resume detection: the queued-event flush and REV-272 implicit
+    /// placement sessions.
     ///
     /// <c>Runtime/Core</c> is plain C# with no UnityEngine dependency (so the
     /// suite runs under dotnet without an Editor), so the platform half lives

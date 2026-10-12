@@ -4,6 +4,27 @@ All notable changes to this package. The format follows [Keep a Changelog](https
 
 ## Unreleased
 
+### Added
+
+- `FlushEvents()` sends queued events now. `Track` and `LogPaywallEvent` are
+  queued in storage (up to 1000) and sent in batches: at 20 queued, 10 s after
+  the first, when the app pauses, and on the next launch. A transient failure
+  keeps them. Paywall events now always carry `eventId` (defaults to the view
+  id) and `occurredAt`.
+- `Preload(placementKeys)` fetches placements ahead of time.
+
+### Changed
+
+- `ResolvePlacement` answers from a cache under 24 h old and refreshes it in
+  the background, so a paywall opens without waiting on the network.
+  `SetAttributes` and purchases invalidate that cache.
+- Entitlement reads with a cached snapshot time out after 3 s instead of the
+  configured timeout.
+- The purchase retry queue keeps at most 100 purchases and drops ones queued
+  more than 30 days ago.
+- `RevnixSdk.Configure` always creates the hidden lifecycle object (it used to
+  only with implicit placements on), so a pause flushes queued events.
+
 ## 1.5.0
 
 The Unity SDK now shares its version number with the other Revnix SDKs (iOS, React Native, Capacitor). This release follows 0.3.0.

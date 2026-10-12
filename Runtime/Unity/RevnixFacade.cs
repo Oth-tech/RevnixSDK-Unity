@@ -17,6 +17,7 @@ namespace Revnix.Unity
     public static class RevnixSdk
     {
         private static RevnixClient _client;
+        private static RevnixLifecycleBehaviour _lifecycle;
 
         /// <summary>The configured client. Throws until Configure() ran.</summary>
         public static RevnixClient Client
@@ -80,13 +81,10 @@ namespace Revnix.Unity
             {
                 config.Device = UnityDeviceFacts.Detect().OverriddenBy(config.Device);
             }
-            // REV-272: foreground detection needs a MonoBehaviour, and only
-            // the facade is allowed to touch UnityEngine — created lazily so a
-            // game that never turns implicit placements on never gets a hidden
-            // GameObject it did not ask for.
-            if (config.Lifecycle == null && config.ImplicitPlacementsEnabled)
+            if (config.Lifecycle == null)
             {
-                config.Lifecycle = RevnixLifecycleBehaviour.Create();
+                if (_lifecycle == null) _lifecycle = RevnixLifecycleBehaviour.Create();
+                config.Lifecycle = _lifecycle;
             }
             // A re-configure retires the previous client's foreground observer,
             // or two would mint a session apiece on every return.

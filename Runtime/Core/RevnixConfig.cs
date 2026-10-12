@@ -106,10 +106,11 @@ namespace Revnix
         /// present.</summary>
         public bool ImplicitPlacementsEnabled => ImplicitPlacements ?? (OnImplicitPaywall != null);
 
-        /// <summary>REV-272: how the SDK learns the app came to the foreground
-        /// — <c>session_start</c> is built on it. Unity's facade fills this with
-        /// a MonoBehaviour over <c>OnApplicationPause</c>; null means
-        /// launch-time moments only.</summary>
+        /// <summary>REV-272: how the SDK learns the app went to the background
+        /// or came back — <c>session_start</c> is built on it, and a pause
+        /// flushes queued events. Unity's facade fills this with a
+        /// MonoBehaviour over <c>OnApplicationPause</c>; null means
+        /// launch-time moments only and no flush on pause.</summary>
         public IRevnixLifecycle Lifecycle;
 
         /// <summary>REV-272: how long the app must have been backgrounded for

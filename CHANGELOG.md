@@ -4,6 +4,8 @@ All notable changes to this package. The format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## 1.6.0 (2026-10-12)
+
 ### Added
 
 - `FlushEvents()` sends queued events now. `Track` and `LogPaywallEvent` are

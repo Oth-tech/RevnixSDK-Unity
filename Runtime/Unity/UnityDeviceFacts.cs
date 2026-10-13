@@ -1,5 +1,8 @@
+using System;
 using System.Globalization;
+using System.Threading.Tasks;
 using System.Text.RegularExpressions;
+using System.Threading;
 using UnityEngine;
 
 namespace Revnix.Unity
@@ -13,6 +16,58 @@ namespace Revnix.Unity
     /// </summary>
     public static class UnityDeviceFacts
     {
+        /// <summary>Google Advertising ID source for
+        /// <see cref="RevnixConfig.AdvertisingId"/>. Needs
+        /// <c>com.google.android.gms:play-services-ads-identifier</c> and the
+        /// <c>com.google.android.gms.permission.AD_ID</c> permission in the
+        /// Android build. Answers null after an opt-out and fails when the id
+        /// cannot be read. Null in the Editor and off Android.</summary>
+        public static Func<Task<string>> AdvertisingId
+        {
+            get
+            {
+#if UNITY_ANDROID && !UNITY_EDITOR
+                return ReadAdvertisingId;
+#else
+                return null;
+#endif
+            }
+        }
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+        private static Task<string> ReadAdvertisingId()
+        {
+            var tcs = new TaskCompletionSource<string>();
+            new Thread(() =>
+            {
+                AndroidJNI.AttachCurrentThread();
+                try
+                {
+                    using (var player = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+                    using (var activity = player.GetStatic<AndroidJavaObject>("currentActivity"))
+                    using (var context = activity.Call<AndroidJavaObject>("getApplicationContext"))
+                    using (var client = new AndroidJavaClass("com.google.android.gms.ads.identifier.AdvertisingIdClient"))
+                    using (var info = client.CallStatic<AndroidJavaObject>("getAdvertisingIdInfo", context))
+                    {
+                        var id = info.Call<string>("getId");
+                        tcs.TrySetResult(info.Call<bool>("isLimitAdTrackingEnabled") || id == "00000000-0000-0000-0000-000000000000"
+                            ? null
+                            : id);
+                    }
+                }
+                catch (Exception err)
+                {
+                    tcs.TrySetException(err);
+                }
+                finally
+                {
+                    AndroidJNI.DetachCurrentThread();
+                }
+            }).Start();
+            return tcs.Task;
+        }
+#endif
+
         public static DeviceFacts Detect()
         {
             string currency = null;

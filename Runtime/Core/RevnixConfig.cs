@@ -153,5 +153,13 @@ namespace Revnix
         /// none. Null (the default) turns it off. Unity's facade fills this
         /// when <c>deviceIntegrity: true</c>.</summary>
         public Func<string, System.Threading.Tasks.Task<Dictionary<string, object>>> DeviceIntegrity;
+
+        /// <summary>Google Advertising ID source, stored on the customer as
+        /// <c>gps_adid</c> after <see cref="RevnixClient.RegisterInstall"/> and
+        /// resent only when it changes. Unity's facade fills this with
+        /// <c>UnityDeviceFacts.AdvertisingId</c> when <c>advertisingId: true</c>.
+        /// A null answer deletes a previously stored <c>gps_adid</c>; a throw
+        /// or a 10 s timeout changes nothing.</summary>
+        public Func<System.Threading.Tasks.Task<string>> AdvertisingId;
     }
 }

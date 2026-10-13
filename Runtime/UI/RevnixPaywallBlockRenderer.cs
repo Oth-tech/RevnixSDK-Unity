@@ -30,6 +30,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using UnityEngine.Video;
 
 namespace Revnix.Unity.UI
 {
@@ -48,6 +49,14 @@ namespace Revnix.Unity.UI
         /// <summary>Host `loading`: purchase buttons go inert and show a
         /// spinner in place of their label. Close buttons are unaffected.</summary>
         public bool Loading;
+
+        public DateTime DisplayedAt = DateTime.UtcNow;
+
+        public Dictionary<string, int> CarouselPages = new Dictionary<string, int>();
+
+        /// <summary>Each video's playback position in seconds by block id, so
+        /// a redraw resumes the clip instead of restarting it.</summary>
+        public Dictionary<string, double> VideoPositions = new Dictionary<string, double>();
 
         /// <summary>Fills an image block that publishes no URL of its own.</summary>
         public string HeroImageUrl;
@@ -319,7 +328,13 @@ namespace Revnix.Unity.UI
                 case PaywallBlockKind.Text:
                     return CloseOnTap(RenderText(block, parent, resolved.TagPackage), block.Action);
                 case PaywallBlockKind.Image:
-                    return CloseOnTap(RenderImage(block, parent), block.Action);
+                    return CloseOnTap(
+                        RenderImage(
+                            block,
+                            parent,
+                            !string.IsNullOrEmpty(block.Url) ? block.Url : _ctx.HeroImageUrl,
+                            !string.IsNullOrEmpty(block.Placeholder) ? block.Placeholder : block.Url),
+                        block.Action);
                 case PaywallBlockKind.List:
                     return RenderList(block, parent);
                 case PaywallBlockKind.Products:
@@ -334,6 +349,12 @@ namespace Revnix.Unity.UI
                     return RenderSpacer(block, parent);
                 case PaywallBlockKind.Card:
                     return RenderCard(block, parent, resolved.Package);
+                case PaywallBlockKind.Timer:
+                    return RenderTimer(block, parent);
+                case PaywallBlockKind.Video:
+                    return RenderVideo(block, parent);
+                case PaywallBlockKind.Toggle:
+                    return RenderToggle(block, parent, resolved.TagPackage);
                 default:
                     // A block type from a newer dashboard: skip it, keep the
                     // screen.
@@ -353,6 +374,132 @@ namespace Revnix.Unity.UI
             return go;
         }
 
+        private GameObject RenderTimer(PaywallBlock block, Transform parent)
+        {
+            var content = RevnixPaywallTimer.Text(
+                block, RevnixPaywallTimer.Remaining(block, _ctx.DisplayedAt, DateTime.UtcNow));
+            if (content == null) return null;
+            var go = NewUI("Timer", parent);
+            var text = go.AddComponent<Text>();
+            ApplyText(text, block.Style, content);
+            ApplyBox(go, block.Style, paint: false);
+            var ticker = go.AddComponent<RevnixPaywallTimerText>();
+            ticker.Block = block;
+            ticker.DisplayedAt = _ctx.DisplayedAt;
+            ticker.Label = text;
+            ticker.Uppercase = block.Style?.TextTransform == "uppercase";
+            return go;
+        }
+
+        private GameObject RenderVideo(PaywallBlock block, Transform parent)
+        {
+            var go = RenderImage(block, parent, block.Poster, null);
+            if (string.IsNullOrEmpty(block.Url)) return go;
+
+            var frame = NewUI("Video", go.transform);
+            Fill((RectTransform)frame.transform);
+            frame.AddComponent<RectMask2D>();
+            var screen = NewUI("Frame", frame.transform);
+            var raw = screen.AddComponent<RawImage>();
+            raw.raycastTarget = false;
+            raw.enabled = false;
+            var fitter = screen.AddComponent<AspectRatioFitter>();
+            fitter.aspectMode = block.Fit == "contain"
+                ? AspectRatioFitter.AspectMode.FitInParent
+                : AspectRatioFitter.AspectMode.EnvelopeParent;
+
+            var player = screen.AddComponent<VideoPlayer>();
+            player.playOnAwake = false;
+            player.source = VideoSource.Url;
+            player.url = block.Url;
+            player.isLooping = true;
+            player.audioOutputMode = VideoAudioOutputMode.None;
+            player.renderMode = VideoRenderMode.RenderTexture;
+            player.waitForFirstFrame = true;
+            player.skipOnDrop = true;
+            var id = block.Id ?? "";
+            var positions = _ctx.VideoPositions;
+            var resume = screen.AddComponent<RevnixPaywallVideoPosition>();
+            resume.Player = player;
+            resume.Positions = positions;
+            resume.Id = id;
+            player.prepareCompleted += source =>
+            {
+                if (source.width == 0 || source.height == 0) return;
+                var texture = new RenderTexture((int)source.width, (int)source.height, 0);
+                screen.AddComponent<RevnixOwnedTexture>().Own(texture);
+                source.targetTexture = texture;
+                raw.texture = texture;
+                fitter.aspectRatio = (float)source.width / source.height;
+                if (positions != null && positions.TryGetValue(id, out var position)) source.time = position;
+                source.Play();
+            };
+            VideoPlayer.FrameReadyEventHandler firstFrame = null;
+            firstFrame = (source, index) =>
+            {
+                raw.enabled = true;
+                source.frameReady -= firstFrame;
+                source.sendFrameReadyEvents = false;
+            };
+            player.sendFrameReadyEvents = true;
+            player.frameReady += firstFrame;
+            player.errorReceived += (source, message) => Diagnostic("video drawn as its poster: " + message);
+            player.Prepare();
+            return go;
+        }
+
+        private GameObject RenderToggle(PaywallBlock block, Transform parent, BlockPackage pkg)
+        {
+            if (!RevnixPaywallSelection.ResolveToggle(block, _ctx.Packages, _selected, out var on, out var tapId))
+            {
+                return null;
+            }
+            var go = NewUI("Toggle", parent);
+            var row = go.AddComponent<HorizontalLayoutGroup>();
+            row.childControlWidth = true;
+            row.childControlHeight = true;
+            row.childForceExpandWidth = false;
+            row.childForceExpandHeight = false;
+            row.childAlignment = TextAnchor.MiddleLeft;
+            row.spacing = 12f;
+
+            var label = NewUI("Label", go.transform);
+            ApplyText(
+                label.AddComponent<Text>(),
+                block.Style,
+                RevnixPaywallTags.Resolve(block.Label ?? "", pkg, _ctx.Packages));
+            Le(label).flexibleWidth = 1f;
+
+            var track = NewUI("Switch", go.transform);
+            var trackSize = Le(track);
+            trackSize.minWidth = trackSize.preferredWidth = 51f;
+            trackSize.minHeight = trackSize.preferredHeight = 31f;
+            var trackImage = track.AddComponent<Image>();
+            trackImage.sprite = RevnixPaywallSprites.Rounded(15);
+            trackImage.type = Image.Type.Sliced;
+            var offTint = Color(_doc.TextColor, UnityEngine.Color.white);
+            offTint.a *= 0.25f;
+            trackImage.color = on ? Color(_doc.Accent, UnityEngine.Color.blue) : offTint;
+            trackImage.raycastTarget = false;
+
+            var knob = NewUI("Knob", track.transform);
+            var knobRt = (RectTransform)knob.transform;
+            var edge = new Vector2(on ? 1f : 0f, 0.5f);
+            knobRt.anchorMin = edge;
+            knobRt.anchorMax = edge;
+            knobRt.pivot = edge;
+            knobRt.sizeDelta = new Vector2(27f, 27f);
+            knobRt.anchoredPosition = new Vector2(on ? -2f : 2f, 0f);
+            var knobImage = knob.AddComponent<Image>();
+            knobImage.sprite = RevnixPaywallSprites.Circle();
+            knobImage.color = UnityEngine.Color.white;
+            knobImage.raycastTarget = false;
+
+            ApplyBox(go, block.Style, paint: true);
+            MakeSelectable(go, tapId);
+            return go;
+        }
+
         /// <summary>
         /// An image slot. The photo loads through the same fetch and cache the
         /// screen background uses (RevnixBackgroundPhoto), so a redraw on
@@ -361,7 +508,7 @@ namespace Revnix.Unity.UI
         /// with no URL of its own takes the config's hero image, then the
         /// placeholder alone.
         /// </summary>
-        private GameObject RenderImage(PaywallBlock block, Transform parent)
+        private GameObject RenderImage(PaywallBlock block, Transform parent, string url, string label)
         {
             var go = NewUI("Image", parent);
             var image = go.AddComponent<Image>();
@@ -413,7 +560,6 @@ namespace Revnix.Unity.UI
             }
 
             GameObject caption = null;
-            var label = !string.IsNullOrEmpty(block.Placeholder) ? block.Placeholder : block.Url;
             if (!string.IsNullOrEmpty(label))
             {
                 caption = NewUI("Placeholder", go.transform);
@@ -429,7 +575,6 @@ namespace Revnix.Unity.UI
                 text.raycastTarget = false;
             }
 
-            var url = !string.IsNullOrEmpty(block.Url) ? block.Url : _ctx.HeroImageUrl;
             if (!string.IsNullOrEmpty(url))
             {
                 var photo = NewUI("Photo", go.transform);
@@ -977,6 +1122,10 @@ namespace Revnix.Unity.UI
                     if (rendered != null) PlaceInFlow(rendered, style, horizontal: true);
                 }
             }
+            else if (layout == "carousel")
+            {
+                BuildCarousel(go, block, pkg);
+            }
             else
             {
                 // column, and anything unrecognized.
@@ -996,6 +1145,77 @@ namespace Revnix.Unity.UI
             }
             ApplyBox(go, block.Style, paint: true);
             return go;
+        }
+
+        private void BuildCarousel(GameObject go, PaywallBlock block, BlockPackage pkg)
+        {
+            Le(go).preferredHeight = (float)(block.Style?.Height?.Px ?? 220);
+
+            var viewport = NewUI("Viewport", go.transform);
+            var viewportRt = (RectTransform)viewport.transform;
+            Fill(viewportRt);
+            var padding = Padding(block.Style);
+            if (padding != null)
+            {
+                viewportRt.offsetMin = new Vector2(padding.left, padding.bottom);
+                viewportRt.offsetMax = new Vector2(-padding.right, -padding.top);
+            }
+            viewport.AddComponent<RectMask2D>();
+            var surface = viewport.AddComponent<Image>();
+            surface.color = UnityEngine.Color.clear;
+            surface.raycastTarget = true;
+
+            var pages = NewUI("Pages", viewport.transform);
+            var pagesRt = (RectTransform)pages.transform;
+            pagesRt.anchorMin = Vector2.zero;
+            pagesRt.anchorMax = new Vector2(0f, 1f);
+            pagesRt.pivot = new Vector2(0f, 0.5f);
+            pagesRt.sizeDelta = Vector2.zero;
+            pagesRt.anchoredPosition = Vector2.zero;
+            foreach (var child in block.Children ?? new List<PaywallBlock>()) Render(child, pages.transform, pkg);
+            var count = pages.transform.childCount;
+
+            var carousel = viewport.AddComponent<RevnixPaywallCarousel>();
+            carousel.horizontal = true;
+            carousel.vertical = false;
+            carousel.movementType = ScrollRect.MovementType.Clamped;
+            carousel.inertia = false;
+            carousel.scrollSensitivity = 0f;
+            carousel.viewport = viewportRt;
+            carousel.content = pagesRt;
+            carousel.AutoAdvance = (float)(block.AutoAdvance ?? 0);
+            carousel.Pages = _ctx.CarouselPages;
+            carousel.Id = block.Id ?? "";
+            carousel.Current = Color(_doc.Accent, UnityEngine.Color.white);
+            carousel.Other = Color(_doc.TextColor, UnityEngine.Color.white);
+            carousel.Other.a *= 0.3f;
+            if (count < 2) return;
+
+            var dots = NewUI("Dots", go.transform);
+            var dotsRt = (RectTransform)dots.transform;
+            var bottom = new Vector2(0.5f, 0f);
+            dotsRt.anchorMin = bottom;
+            dotsRt.anchorMax = bottom;
+            dotsRt.pivot = bottom;
+            dotsRt.sizeDelta = new Vector2(count * 12f - 6f, 6f);
+            dotsRt.anchoredPosition = new Vector2(0f, 8f);
+            carousel.Dots = new Image[count];
+            for (var i = 0; i < count; i++)
+            {
+                var dot = NewUI("Dot", dots.transform);
+                var dotRt = (RectTransform)dot.transform;
+                var left = new Vector2(0f, 0.5f);
+                dotRt.anchorMin = left;
+                dotRt.anchorMax = left;
+                dotRt.pivot = left;
+                dotRt.sizeDelta = new Vector2(6f, 6f);
+                dotRt.anchoredPosition = new Vector2(i * 12f, 0f);
+                var image = dot.AddComponent<Image>();
+                image.sprite = RevnixPaywallSprites.Circle();
+                image.color = carousel.Other;
+                image.raycastTarget = false;
+                carousel.Dots[i] = image;
+            }
         }
 
         /// <summary>
@@ -1234,19 +1454,11 @@ namespace Revnix.Unity.UI
                 PaintFillGradients(go, gradients, style.Radius);
             }
 
-            var padLeft = style.PaddingLeft ?? style.PaddingX ?? style.Padding;
-            var padRight = style.PaddingRight ?? style.PaddingX ?? style.Padding;
-            var padTop = style.PaddingTop ?? style.PaddingY ?? style.Padding;
-            var padBottom = style.PaddingBottom ?? style.PaddingY ?? style.Padding;
-            if (padLeft.HasValue || padRight.HasValue || padTop.HasValue || padBottom.HasValue)
+            var padding = Padding(style);
+            if (padding != null)
             {
                 var group = go.GetComponent<HorizontalOrVerticalLayoutGroup>();
-                if (group != null)
-                {
-                    group.padding = new RectOffset(
-                        (int)Math.Round(padLeft ?? 0), (int)Math.Round(padRight ?? 0),
-                        (int)Math.Round(padTop ?? 0), (int)Math.Round(padBottom ?? 0));
-                }
+                if (group != null) group.padding = padding;
             }
 
             if (!skipHeight && style.Height?.Px is double height) Le(go).preferredHeight = (float)height;
@@ -1265,6 +1477,19 @@ namespace Revnix.Unity.UI
             }
 
             ReportUndrawnGeometry(style);
+        }
+
+        private static RectOffset Padding(BlockStyle style)
+        {
+            if (style == null) return null;
+            var padLeft = style.PaddingLeft ?? style.PaddingX ?? style.Padding;
+            var padRight = style.PaddingRight ?? style.PaddingX ?? style.Padding;
+            var padTop = style.PaddingTop ?? style.PaddingY ?? style.Padding;
+            var padBottom = style.PaddingBottom ?? style.PaddingY ?? style.Padding;
+            if (!padLeft.HasValue && !padRight.HasValue && !padTop.HasValue && !padBottom.HasValue) return null;
+            return new RectOffset(
+                (int)Math.Round(padLeft ?? 0), (int)Math.Round(padRight ?? 0),
+                (int)Math.Round(padTop ?? 0), (int)Math.Round(padBottom ?? 0));
         }
 
         /// <summary>
@@ -1716,6 +1941,164 @@ namespace Revnix.Unity.UI
             if (width <= 0f) return;
             var height = width / Ratio;
             if (!Mathf.Approximately(Element.preferredHeight, height)) Element.preferredHeight = height;
+        }
+    }
+
+    internal sealed class RevnixPaywallTimerText : MonoBehaviour
+    {
+        public PaywallBlock Block;
+        public DateTime DisplayedAt;
+        public Text Label;
+        public bool Uppercase;
+
+        private long _shown = -1;
+
+        private void Update()
+        {
+            if (Block == null || Label == null) return;
+            var remaining = RevnixPaywallTimer.Remaining(Block, DisplayedAt, DateTime.UtcNow);
+            if (remaining == _shown) return;
+            _shown = remaining;
+            var content = RevnixPaywallTimer.Text(Block, remaining);
+            if (content == null)
+            {
+                gameObject.SetActive(false);
+                return;
+            }
+            Label.text = Uppercase ? content.ToUpperInvariant() : content;
+        }
+    }
+
+    internal sealed class RevnixPaywallVideoPosition : MonoBehaviour
+    {
+        public VideoPlayer Player;
+        public Dictionary<string, double> Positions;
+        public string Id;
+
+        private void OnDestroy()
+        {
+            if (Player != null && Positions != null && Player.isPrepared) Positions[Id] = Player.time;
+        }
+    }
+
+    internal sealed class RevnixPaywallCarousel : ScrollRect
+    {
+        public float AutoAdvance;
+        public Image[] Dots;
+        public Color Current;
+        public Color Other;
+        public Dictionary<string, int> Pages;
+        public string Id;
+
+        private int _page = -1;
+        private float _width = -1f;
+        private float _idle;
+        private bool _dragging;
+        private bool _routeToOuter;
+        private ScrollRect _outer;
+
+        protected override void LateUpdate()
+        {
+            base.LateUpdate();
+            if (content == null || viewport == null) return;
+            var count = content.childCount;
+            var width = viewport.rect.width;
+            if (count == 0 || width <= 0f) return;
+            if (_page < 0) Show(Pages != null && Pages.TryGetValue(Id ?? "", out var saved) ? saved : 0);
+            if (!Mathf.Approximately(width, _width))
+            {
+                _width = width;
+                content.anchoredPosition = new Vector2(-_page * width, 0f);
+                content.sizeDelta = new Vector2(count * width, 0f);
+                for (var i = 0; i < count; i++)
+                {
+                    var page = (RectTransform)content.GetChild(i);
+                    page.anchorMin = Vector2.zero;
+                    page.anchorMax = new Vector2(0f, 1f);
+                    page.pivot = new Vector2(0f, 0.5f);
+                    page.sizeDelta = new Vector2(width, 0f);
+                    page.anchoredPosition = new Vector2(i * width, 0f);
+                }
+            }
+            if (_dragging) return;
+            if (AutoAdvance > 0f && count > 1)
+            {
+                _idle += Time.unscaledDeltaTime;
+                if (_idle >= AutoAdvance)
+                {
+                    _idle = 0f;
+                    Show((_page + 1) % count);
+                }
+            }
+            var target = -_page * width;
+            var x = content.anchoredPosition.x;
+            x = Mathf.Abs(x - target) < 0.5f ? target : Mathf.Lerp(x, target, Mathf.Min(1f, Time.unscaledDeltaTime * 12f));
+            content.anchoredPosition = new Vector2(x, 0f);
+        }
+
+        public override void OnInitializePotentialDrag(PointerEventData eventData)
+        {
+            var outer = Outer();
+            if (outer != null) outer.OnInitializePotentialDrag(eventData);
+            base.OnInitializePotentialDrag(eventData);
+        }
+
+        public override void OnBeginDrag(PointerEventData eventData)
+        {
+            _routeToOuter = Mathf.Abs(eventData.delta.y) > Mathf.Abs(eventData.delta.x);
+            if (_routeToOuter)
+            {
+                var outer = Outer();
+                if (outer != null) outer.OnBeginDrag(eventData);
+                return;
+            }
+            _dragging = true;
+            base.OnBeginDrag(eventData);
+        }
+
+        public override void OnDrag(PointerEventData eventData)
+        {
+            if (!_routeToOuter)
+            {
+                base.OnDrag(eventData);
+                return;
+            }
+            var outer = Outer();
+            if (outer != null) outer.OnDrag(eventData);
+        }
+
+        public override void OnEndDrag(PointerEventData eventData)
+        {
+            if (_routeToOuter)
+            {
+                _routeToOuter = false;
+                var outer = Outer();
+                if (outer != null) outer.OnEndDrag(eventData);
+                return;
+            }
+            base.OnEndDrag(eventData);
+            _dragging = false;
+            _idle = 0f;
+            if (_width <= 0f || content == null) return;
+            var moved = (-content.anchoredPosition.x / _width) - _page;
+            Show(_page + (moved > 0.15f ? 1 : (moved < -0.15f ? -1 : 0)));
+        }
+
+        private void Show(int page)
+        {
+            _page = Mathf.Clamp(page, 0, Mathf.Max(0, content.childCount - 1));
+            if (Pages != null) Pages[Id ?? ""] = _page;
+            if (Dots == null) return;
+            for (var i = 0; i < Dots.Length; i++)
+            {
+                if (Dots[i] != null) Dots[i].color = i == _page ? Current : Other;
+            }
+        }
+
+        private ScrollRect Outer()
+        {
+            if (_outer == null && transform.parent != null) _outer = transform.parent.GetComponentInParent<ScrollRect>();
+            return _outer;
         }
     }
 }

@@ -273,7 +273,13 @@ namespace Revnix
                     if (copy.Text != null) copy.Text = lookup(id + ".text", copy.Text);
                     break;
                 case PaywallBlockKind.Button:
+                case PaywallBlockKind.Toggle:
                     if (copy.Label != null) copy.Label = lookup(id + ".label", copy.Label);
+                    break;
+                case PaywallBlockKind.Timer:
+                    if (copy.Format != null) copy.Format = lookup(id + ".format", copy.Format);
+                    if (copy.ExpiredText != null)
+                        copy.ExpiredText = lookup(id + ".expiredText", copy.ExpiredText);
                     break;
                 case PaywallBlockKind.List:
                     if (copy.Items != null)

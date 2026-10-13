@@ -118,6 +118,9 @@ namespace Revnix.Unity.UI
         private bool _loading;
         private string _controlledSelected;
         private string _internalSelected;
+        private readonly DateTime _displayedAt = DateTime.UtcNow;
+        private readonly Dictionary<string, int> _carouselPages = new Dictionary<string, int>();
+        private readonly Dictionary<string, double> _videoPositions = new Dictionary<string, double>();
 
         /// <summary>Whether the view drew a designed (block) paywall.</summary>
         private bool _blockPaywall;
@@ -390,6 +393,9 @@ namespace Revnix.Unity.UI
                     Packages = packages,
                     SelectedPackageId = selected,
                     Loading = _loading,
+                    DisplayedAt = _displayedAt,
+                    CarouselPages = _carouselPages,
+                    VideoPositions = _videoPositions,
                     HeroImageUrl = _config.HeroImageUrl,
                     FooterTermsUrl = _config.Footer != null ? _config.Footer.TermsUrl : null,
                     FooterPrivacyUrl = _config.Footer != null ? _config.Footer.PrivacyUrl : null,

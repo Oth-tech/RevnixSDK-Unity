@@ -394,6 +394,9 @@ namespace Revnix
         Line,
         Spacer,
         Card,
+        Timer,
+        Video,
+        Toggle,
     }
 
     /// <summary>
@@ -470,6 +473,15 @@ namespace Revnix
         public string Shape;
         public string Fit;
         public string Placeholder;
+        public string Poster;
+
+        public string EndsAt;
+        public long? Duration;
+        public string Format;
+        public string ExpiredText;
+
+        public int? OnPackageIndex;
+        public int? OffPackageIndex;
 
         // list
         public List<BlockListItem> Items;
@@ -509,6 +521,9 @@ namespace Revnix
 
         /// <summary>grid only — a CSS track list ("1fr 60px 66px").</summary>
         public string GridColumns;
+
+        /// <summary>carousel only — seconds between automatic page turns.</summary>
+        public double? AutoAdvance;
 
         public List<PaywallBlock> Children;
 
@@ -715,8 +730,30 @@ namespace Revnix
                     var columns = RevnixJson.GetNullableLong(map, "columns");
                     block.Columns = columns.HasValue ? (int)columns.Value : (int?)null;
                     block.GridColumns = RevnixJson.GetString(map, "gridColumns");
+                    block.AutoAdvance = RevnixJson.GetNullableDouble(map, "autoAdvance");
                     block.Children = new List<PaywallBlock>();
                     foreach (var child in RevnixJson.GetList(map, "children")) block.Children.Add(ParseBlock(child));
+                    break;
+                case "timer":
+                    block.Kind = PaywallBlockKind.Timer;
+                    block.EndsAt = RevnixJson.GetString(map, "endsAt");
+                    block.Duration = RevnixJson.GetNullableLong(map, "duration");
+                    block.Format = RevnixJson.GetString(map, "format");
+                    block.ExpiredText = RevnixJson.GetString(map, "expiredText");
+                    break;
+                case "video":
+                    block.Kind = PaywallBlockKind.Video;
+                    block.Url = RevnixJson.GetString(map, "url");
+                    block.Poster = RevnixJson.GetString(map, "poster");
+                    block.Fit = RevnixJson.GetString(map, "fit");
+                    break;
+                case "toggle":
+                    block.Kind = PaywallBlockKind.Toggle;
+                    block.Label = RevnixJson.GetString(map, "label", "");
+                    var on = RevnixJson.GetNullableLong(map, "onPackageIndex");
+                    block.OnPackageIndex = on.HasValue ? (int)on.Value : (int?)null;
+                    var off = RevnixJson.GetNullableLong(map, "offPackageIndex");
+                    block.OffPackageIndex = off.HasValue ? (int)off.Value : (int?)null;
                     break;
                 default:
                     // A block type from a newer dashboard. Skipped when drawing.
@@ -725,6 +762,56 @@ namespace Revnix
             }
             return block;
         }
+    }
+
+    /// <summary>The countdown a <see cref="PaywallBlockKind.Timer"/> block draws.</summary>
+    public static class RevnixPaywallTimer
+    {
+        public const string DefaultFormat = "{hh}:{mm}:{ss}";
+
+        /// <summary>
+        /// Whole seconds left, never negative. A <c>duration</c> counts from
+        /// <paramref name="displayedAt"/>, the moment the paywall was first
+        /// shown; an <c>endsAt</c> that does not parse is already expired.
+        /// </summary>
+        public static long Remaining(PaywallBlock block, DateTime displayedAt, DateTime now)
+        {
+            DateTime deadline;
+            if (block.Duration.HasValue)
+            {
+                deadline = displayedAt.ToUniversalTime().AddSeconds(block.Duration.Value);
+            }
+            else if (DateTimeOffset.TryParse(block.EndsAt, CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal, out var endsAt))
+            {
+                deadline = endsAt.UtcDateTime;
+            }
+            else
+            {
+                return 0;
+            }
+            return Math.Max(0, (long)Math.Floor((deadline - now.ToUniversalTime()).TotalSeconds));
+        }
+
+        /// <summary>Fills <c>{d}</c>, <c>{hh}</c>, <c>{mm}</c> and <c>{ss}</c>.</summary>
+        public static string Format(string format, long remaining)
+        {
+            var text = format ?? DefaultFormat;
+            var afterDays = text.Contains("{d}") ? remaining % 86400 : remaining;
+            var afterHours = text.Contains("{hh}") ? afterDays % 3600 : afterDays;
+            var afterMinutes = text.Contains("{mm}") ? afterHours % 60 : afterHours;
+            return text
+                .Replace("{d}", (remaining / 86400).ToString(CultureInfo.InvariantCulture))
+                .Replace("{hh}", (afterDays / 3600).ToString("00", CultureInfo.InvariantCulture))
+                .Replace("{mm}", (afterHours / 60).ToString("00", CultureInfo.InvariantCulture))
+                .Replace("{ss}", afterMinutes.ToString("00", CultureInfo.InvariantCulture));
+        }
+
+        /// <summary>What the block shows with <paramref name="remaining"/>
+        /// seconds left; null when it has expired and names no
+        /// <c>expiredText</c>, and is not drawn.</summary>
+        public static string Text(PaywallBlock block, long remaining)
+            => remaining > 0 ? Format(block.Format, remaining) : block.ExpiredText;
     }
 
     /// <summary>
@@ -791,6 +878,7 @@ namespace Revnix
                         // customer with no way out — the exact bug this feature
                         // exists to fix.
                         if (block.Repeat == null && block.PackageIndex == null &&
+                            block.Layout != "carousel" &&
                             HasCloseAction(block.Children)) return true;
                         break;
                 }

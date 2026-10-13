@@ -6,6 +6,7 @@ All notable changes to this package. The format follows [Keep a Changelog](https
 
 ### Added
 
+- Device integrity: `Configure(..., deviceIntegrity: true)` (or `RevnixConfig.DeviceIntegrity`) attaches Apple App Attest / Google Play Integrity evidence to install and attribution reports. Ships an iOS plugin and an EDM4U `Editor/RevnixDependencies.xml` for `com.google.android.play:integrity`.
 - Paywall blocks: `timer` (countdown to a date or from when the paywall opens), `video` (muted looping clip with a poster), `toggle` (free-trial switch that flips the selected package) and the card `carousel` layout (swipeable pages with dots and optional auto-advance). Declares the built-in `com.unity.modules.video` module.
 
 ## 1.6.0 (2026-10-12)

@@ -4,11 +4,14 @@ All notable changes to this package. The format follows [Keep a Changelog](https
 
 ## Unreleased
 
+### Added
+
+- Paywall blocks: `timer` (countdown to a date or from when the paywall opens), `video` (muted looping clip with a poster), `toggle` (free-trial switch that flips the selected package) and the card `carousel` layout (swipeable pages with dots and optional auto-advance). Declares the built-in `com.unity.modules.video` module.
+
 ## 1.6.0 (2026-10-12)
 
 ### Added
 
-- Paywall blocks: `timer` (countdown to a date or from when the paywall opens), `video` (muted looping clip with a poster), `toggle` (free-trial switch that flips the selected package) and the card `carousel` layout (swipeable pages with dots and optional auto-advance). Declares the built-in `com.unity.modules.video` module.
 - `FlushEvents()` sends queued events now. `Track` and `LogPaywallEvent` are
   queued in storage (up to 1000) and sent in batches: at 20 queued, 10 s after
   the first, when the app pauses, and on the next launch. A transient failure

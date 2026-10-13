@@ -175,6 +175,34 @@ namespace Revnix
                 && !IsRepeat(block) && block.PackageIndex.HasValue;
 
         /// <summary>
+        /// A toggle block against the offering: whether it is ON (the selected
+        /// package is its <c>onPackageIndex</c> package) and the package a tap
+        /// selects. False when either index is outside the offering, and the
+        /// block is not drawn.
+        /// </summary>
+        public static bool ResolveToggle(
+            PaywallBlock block,
+            IList<BlockPackage> packages,
+            string selectedId,
+            out bool on,
+            out string tapPackageId)
+        {
+            on = false;
+            tapPackageId = null;
+            var onPkg = PackageAt(packages, block?.OnPackageIndex);
+            var offPkg = PackageAt(packages, block?.OffPackageIndex);
+            if (onPkg == null || offPkg == null) return false;
+            on = onPkg.PackageId == ResolveSelectedPackageId(packages, selectedId, null, null);
+            tapPackageId = on ? offPkg.PackageId : onPkg.PackageId;
+            return true;
+        }
+
+        private static BlockPackage PackageAt(IList<BlockPackage> packages, int? index)
+            => packages != null && index.HasValue && index.Value >= 0 && index.Value < packages.Count
+                ? packages[index.Value]
+                : null;
+
+        /// <summary>
         /// Resolves a block where it sits in the tree. A pinned card decides
         /// its own context from its own package; everything else inherits the
         /// enclosing package card's. Returns null for a pinned card whose index

@@ -38,14 +38,18 @@ namespace Revnix.Unity
         /// <summary>Configure once at startup, from the main thread. Use a
         /// publishable key (`rvx_pk_…`) — secret keys must never ship in a
         /// build. Reconfiguring replaces the client (same replace-on-
-        /// reconfigure semantics as the other Revnix SDKs).</summary>
+        /// reconfigure semantics as the other Revnix SDKs).
+        /// <paramref name="deviceIntegrity"/> attaches Apple App Attest /
+        /// Google Play Integrity evidence to install reports on device; see
+        /// <see cref="RevnixDeviceIntegrity"/>.</summary>
         public static RevnixClient Configure(
             string apiKey,
             string baseUrl,
             Action<RevnixDiagnostic> onDiagnostic = null,
             Action<RevnixImplicitTrigger> onImplicitPaywall = null,
             Action<string, DeferredDeepLinkMatch> onDeferredDeepLink = null,
-            Action<RevnixAttribution> onAttribution = null)
+            Action<RevnixAttribution> onAttribution = null,
+            bool deviceIntegrity = false)
         {
             var config = new RevnixConfig
             {
@@ -60,6 +64,7 @@ namespace Revnix.Unity
                 OnImplicitPaywall = onImplicitPaywall,
                 OnDeferredDeepLink = onDeferredDeepLink,
                 OnAttribution = onAttribution,
+                DeviceIntegrity = deviceIntegrity ? RevnixDeviceIntegrity.Provider : null,
             };
             return Configure(config);
         }
@@ -114,7 +119,7 @@ namespace Revnix.Unity
 
         /// <summary>AT9: hand over the Apple AdServices attribution token,
         /// minted yourself via your own native iOS plugin — this package
-        /// ships no <c>ios/</c> layer, so there is nothing here to call
+        /// ships no AdServices bridge, so there is nothing here to call
         /// <c>AAAttribution</c> from. Fills platform/appVersion the same way
         /// <see cref="HandleInstallReferrer"/> does. Fire-and-forget; if you
         /// need the server's <c>appleAttribution</c> verdict to decide

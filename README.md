@@ -29,6 +29,7 @@ Revnix SDK makes subscriptions, paywalls and attribution for Unity fast and easy
 - [Paywalls that update without app releases](#paywalls-that-update-without-app-releases)
 - [A/B tests with a built-in holdout](#ab-tests-with-a-built-in-holdout)
 - [Attribution and deep links](#attribution-and-deep-links)
+- [Device integrity](#device-integrity)
 - [Real-time analytics for your Unity game](#real-time-analytics-for-your-unity-game)
 - [Platform Support](#platform-support)
 - [Documentation](#documentation)
@@ -139,6 +140,13 @@ Learn more in [A/B tests](https://www.revnix.io/docs/ab-tests).
 - **Deferred deep links** resolve on first launch through `onDeferredDeepLink`. See [Deferred deep links](https://www.revnix.io/docs/deferred-deep-links).
 - **Apple Search Ads** through `HandleAttributionToken`. See [Apple Search Ads](https://www.revnix.io/docs/apple-search-ads).
 - **MMP forwarding**, **ad revenue** and **uninstall measurement**. See [MMP attribution](https://www.revnix.io/docs/mmp-attribution), [Ad revenue](https://www.revnix.io/docs/ad-revenue) and [Uninstall measurement](https://www.revnix.io/docs/uninstall-measurement).
+
+## Device integrity
+
+Pass `deviceIntegrity: true` to `RevnixSdk.Configure` (or set `config.DeviceIntegrity = RevnixDeviceIntegrity.Provider`) to attach Apple App Attest or Google Play Integrity evidence to install and attribution reports, so the dashboard's "Require device integrity" setting keeps your installs attributed. Off by default; the Editor and other platforms send none.
+
+- **iOS** needs iOS 14+. The package ships the plugin and links `DeviceCheck`.
+- **Android** needs `com.google.android.play:integrity:1.6.0` in the Gradle build. [External Dependency Manager for Unity](https://github.com/googlesamples/unity-jar-resolver) picks it up from the package's `Editor/RevnixDependencies.xml`; without it, add `implementation 'com.google.android.play:integrity:1.6.0'` to `Assets/Plugins/Android/mainTemplate.gradle`. With minification on, add `-keep class com.google.android.play.core.integrity.** { *; }` and `-keep class com.google.android.gms.tasks.** { *; }` to your ProGuard file.
 
 ## Real-time analytics for your Unity game
 

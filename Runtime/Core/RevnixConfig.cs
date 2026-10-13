@@ -145,5 +145,13 @@ namespace Revnix
         /// <see cref="RevnixClient.HandleAttributionToken"/>, since those are
         /// the moments a fresh verdict becomes available.</summary>
         public Action<RevnixAttribution> OnAttribution;
+
+        /// <summary>Opt-in device integrity evidence (Apple App Attest /
+        /// Google Play Integrity) attached as <c>integrity</c> to install and
+        /// attribution reports. Called with the customer id once until the id
+        /// changes and given 10 s; returns the evidence object, or null to send
+        /// none. Null (the default) turns it off. Unity's facade fills this
+        /// when <c>deviceIntegrity: true</c>.</summary>
+        public Func<string, System.Threading.Tasks.Task<Dictionary<string, object>>> DeviceIntegrity;
     }
 }

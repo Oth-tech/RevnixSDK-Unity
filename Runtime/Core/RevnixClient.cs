@@ -38,6 +38,7 @@ namespace Revnix
         private const int CachedEntitlementsTimeoutMs = 3000;
         private const int PurchaseQueueCap = 100;
         private const long PurchaseMaxAgeMs = 30L * 24 * 3600 * 1000;
+        private const int IntegrityTimeoutMs = 10_000;
 
         private static readonly Regex PreviewTokenRe =
             new Regex(@"[?&]revnix_preview=([0-9a-f]{64})(?:[&#]|$)");
@@ -71,6 +72,8 @@ namespace Revnix
         // nothing to send" from "not built yet".
         private string _deviceHeader;
         private bool _deviceHeaderBuilt;
+        private Task<Dictionary<string, object>> _integrity;
+        private string _integrityCid;
 
         // REV-272: implicit placements. Off unless the host said what to do
         // with a paywall — without a handler there is nothing to do with the
@@ -1070,6 +1073,7 @@ namespace Revnix
             if (platform != null) body["platform"] = platform;
             if (appVersion != null) body["appVersion"] = appVersion;
             if (_config.Device?.DeviceKey != null) body["deviceKey"] = _config.Device.DeviceKey;
+            await AttachIntegrity(body, cid);
             try
             {
                 var raw = await Request("POST", new[] { "v1", "installs" }, body);
@@ -1107,6 +1111,7 @@ namespace Revnix
             if (platform != null) body["platform"] = platform;
             if (appVersion != null) body["appVersion"] = appVersion;
             if (_config.Device?.DeviceKey != null) body["deviceKey"] = _config.Device.DeviceKey;
+            await AttachIntegrity(body, cid);
             try
             {
                 var raw = await Request("POST", new[] { "v1", "installs" }, body);
@@ -1122,7 +1127,7 @@ namespace Revnix
 
         /// <summary>Reports the Apple AdServices attribution token (minted by
         /// the caller's own native iOS plugin — this package ships no
-        /// <c>ios/</c> layer, so there is nothing here to call
+        /// AdServices bridge, so there is nothing here to call
         /// <c>AAAttribution</c> from) so the server can resolve which Apple
         /// Search Ads campaign, if any, drove the install. <paramref
         /// name="platform"/> and <paramref name="appVersion"/> mirror
@@ -1151,6 +1156,7 @@ namespace Revnix
             if (platform != null) body["platform"] = platform;
             if (appVersion != null) body["appVersion"] = appVersion;
             if (_config.Device?.DeviceKey != null) body["deviceKey"] = _config.Device.DeviceKey;
+            await AttachIntegrity(body, cid);
             try
             {
                 var raw = await Request("POST", new[] { "v1", "installs" }, body);
@@ -1162,6 +1168,48 @@ namespace Revnix
             {
                 _bgFailures += 1;
                 Diagnostic("handleAttributionToken", err.Message);
+                return null;
+            }
+        }
+
+        private async Task AttachIntegrity(Dictionary<string, object> body, string cid)
+        {
+            var hook = _config.DeviceIntegrity;
+            if (hook == null) return;
+            Task<Dictionary<string, object>> evidence;
+            lock (_lock) evidence = _integrityCid == cid ? _integrity : null;
+            if (evidence == null)
+            {
+                evidence = IntegrityEvidence(hook, cid);
+                lock (_lock)
+                {
+                    _integrity = evidence;
+                    _integrityCid = cid;
+                }
+            }
+            var integrity = await evidence;
+            if (integrity != null) body["integrity"] = integrity;
+        }
+
+        private async Task<Dictionary<string, object>> IntegrityEvidence(
+            Func<string, Task<Dictionary<string, object>>> hook, string cid)
+        {
+            try
+            {
+                var attest = hook(cid);
+                if (await Task.WhenAny(attest, _config.Delay(IntegrityTimeoutMs)) != attest)
+                {
+                    _ = attest.ContinueWith(t => t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+                    Diagnostic("deviceIntegrity", "attestation timed out");
+                    return null;
+                }
+                var integrity = await attest;
+                if (integrity == null) Diagnostic("deviceIntegrity", "evidence unavailable");
+                return integrity;
+            }
+            catch (Exception err)
+            {
+                Diagnostic("deviceIntegrity", err.Message);
                 return null;
             }
         }
@@ -1652,9 +1700,10 @@ namespace Revnix
             var payload = string.Join(
                 "\u0001", provider, network, campaign ?? "", adGroup ?? "", creative ?? "");
             if (_config.Storage.Get(KeyLastAttribution) == payload) return;
+            var cid = CustomerId();
             var body = new Dictionary<string, object>
             {
-                ["customerId"] = CustomerId(),
+                ["customerId"] = cid,
                 ["provider"] = Truncate(provider),
                 ["network"] = Truncate(network),
                 ["sdkVersion"] = SdkVersion,
@@ -1662,6 +1711,7 @@ namespace Revnix
             if (campaign != null) body["campaign"] = Truncate(campaign);
             if (adGroup != null) body["adGroup"] = Truncate(adGroup);
             if (creative != null) body["creative"] = Truncate(creative);
+            await AttachIntegrity(body, cid);
             try
             {
                 await Request("POST", new[] { "v1", "attribution" }, body);

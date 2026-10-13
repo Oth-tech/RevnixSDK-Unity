@@ -41,7 +41,9 @@ namespace Revnix.Unity
         /// reconfigure semantics as the other Revnix SDKs).
         /// <paramref name="deviceIntegrity"/> attaches Apple App Attest /
         /// Google Play Integrity evidence to install reports on device; see
-        /// <see cref="RevnixDeviceIntegrity"/>.</summary>
+        /// <see cref="RevnixDeviceIntegrity"/>.
+        /// <paramref name="advertisingId"/> stores the Google Advertising ID as
+        /// <c>gps_adid</c> on Android; see <see cref="UnityDeviceFacts.AdvertisingId"/>.</summary>
         public static RevnixClient Configure(
             string apiKey,
             string baseUrl,
@@ -49,7 +51,8 @@ namespace Revnix.Unity
             Action<RevnixImplicitTrigger> onImplicitPaywall = null,
             Action<string, DeferredDeepLinkMatch> onDeferredDeepLink = null,
             Action<RevnixAttribution> onAttribution = null,
-            bool deviceIntegrity = false)
+            bool deviceIntegrity = false,
+            bool advertisingId = false)
         {
             var config = new RevnixConfig
             {
@@ -65,6 +68,7 @@ namespace Revnix.Unity
                 OnDeferredDeepLink = onDeferredDeepLink,
                 OnAttribution = onAttribution,
                 DeviceIntegrity = deviceIntegrity ? RevnixDeviceIntegrity.Provider : null,
+                AdvertisingId = advertisingId ? UnityDeviceFacts.AdvertisingId : null,
             };
             return Configure(config);
         }

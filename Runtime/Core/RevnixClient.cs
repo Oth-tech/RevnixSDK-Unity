@@ -39,6 +39,7 @@ namespace Revnix
         private const int PurchaseQueueCap = 100;
         private const long PurchaseMaxAgeMs = 30L * 24 * 3600 * 1000;
         private const int IntegrityTimeoutMs = 10_000;
+        private const int AdvertisingIdTimeoutMs = 10_000;
 
         private static readonly Regex PreviewTokenRe =
             new Regex(@"[?&]revnix_preview=([0-9a-f]{64})(?:[&#]|$)");
@@ -53,6 +54,7 @@ namespace Revnix
         private const string KeyAttribution = "revnix.attribution";
         private const string KeyLastAttribution = "revnix.lastAttribution";
         private const string KeyLastPushToken = "revnix.lastPushToken";
+        private const string KeyLastAdId = "revnix.lastAdId";
         private const string KeySessionStartedAt = "revnix.sessionStartedAt";
         private const string KeyLastBackgroundAt = "revnix.lastBackgroundAt";
         private const string KeyEventQueue = "revnix.eventQueue";
@@ -1062,6 +1064,45 @@ namespace Revnix
 
         /// <summary>Fire-and-forget install beacon; once per customer id.</summary>
         public async Task RegisterInstall(string platform = null, string appVersion = null)
+        {
+            await PostInstall(platform, appVersion);
+            if (_config.AdvertisingId != null) _ = ReportAdvertisingId(_config.AdvertisingId);
+        }
+
+        private async Task ReportAdvertisingId(Func<Task<string>> source)
+        {
+            string id;
+            try
+            {
+                var read = source();
+                if (await Task.WhenAny(read, _config.Delay(AdvertisingIdTimeoutMs)) != read)
+                {
+                    _ = read.ContinueWith(t => t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+                    return;
+                }
+                id = await read;
+            }
+            catch (Exception err)
+            {
+                Diagnostic("advertisingId", err.Message);
+                return;
+            }
+            var stored = _config.Storage.Get(KeyLastAdId);
+            var payload = string.Join("\u0001", CustomerId(), id ?? "");
+            if (payload == stored || (id == null && stored == null)) return;
+            try
+            {
+                await SetAttributes(new Dictionary<string, object> { ["gps_adid"] = id });
+                _config.Storage.Set(KeyLastAdId, payload);
+            }
+            catch (RevnixException err)
+            {
+                _bgFailures += 1;
+                Diagnostic("advertisingId", err.Message);
+            }
+        }
+
+        private async Task PostInstall(string platform, string appVersion)
         {
             var cid = CustomerId();
             if (_config.Storage.Get(InstallReportedKey(cid)) != null) return;

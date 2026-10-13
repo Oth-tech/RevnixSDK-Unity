@@ -4,6 +4,8 @@ All notable changes to this package. The format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## 1.7.0 (2026-10-13)
+
 ### Added
 
 - Google Advertising ID: `Configure(..., advertisingId: true)` (or `RevnixConfig.AdvertisingId`) stores it on the customer as `gps_adid` on Android after `RegisterInstall`, resent only when it changes and deleted after an opt-out. The Android build needs `com.google.android.gms:play-services-ads-identifier` and the `com.google.android.gms.permission.AD_ID` permission in the app; without them, or after an opt-out, nothing is stored.

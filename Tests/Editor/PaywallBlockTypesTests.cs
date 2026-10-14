@@ -187,5 +187,60 @@ namespace Revnix.Tests
             var source = Doc();
             Assert.AreEqual("Offer ends in {mm}:{ss}", source.Blocks[0].Format);
         }
+
+        private const string OnboardingJson = @"{
+          ""version"": 1,
+          ""locales"": { ""es"": { ""s1_t.text"": ""Bienvenido"", ""s1_n.label"": ""Continuar"" } },
+          ""screens"": [
+            [ { ""id"": ""s1_t"", ""type"": ""text"", ""text"": ""Welcome"" },
+              { ""id"": ""s1_n"", ""type"": ""button"", ""label"": ""Continue"", ""action"": ""next"" },
+              { ""id"": ""s1_x"", ""type"": ""image"", ""action"": ""close"" } ],
+            ""not a screen"",
+            [ { ""id"": ""s2_b"", ""type"": ""text"", ""text"": ""Back"", ""action"": ""back"" },
+              { ""id"": ""s2_n"", ""type"": ""button"", ""label"": ""Continue"", ""action"": ""next"" },
+              { ""id"": ""s2_u"", ""type"": ""text"", ""text"": ""Skip"", ""action"": ""skip"" },
+              { ""id"": ""s2_s"", ""type"": ""sparkle"" },
+              42 ]
+          ],
+          ""blocks"": [ { ""id"": ""p_b"", ""type"": ""button"", ""label"": ""Start free trial"" } ]
+        }";
+
+        [Test]
+        public void ParsesScreensAndNavigationActions()
+        {
+            var doc = PaywallBlockDoc.Parse(RevnixJson.Parse(OnboardingJson));
+            Assert.AreEqual(2, doc.Screens.Count);
+            Assert.AreEqual(BlockAction.Next, doc.Screens[0][1].Action);
+            Assert.AreEqual(BlockAction.Close, doc.Screens[0][2].Action);
+            Assert.AreEqual(BlockAction.Back, doc.Screens[1][0].Action);
+            Assert.AreEqual(BlockAction.Next, doc.Screens[1][1].Action);
+            Assert.AreEqual(BlockAction.None, doc.Screens[1][2].Action);
+            Assert.AreEqual(PaywallBlockKind.Unknown, doc.Screens[1][3].Kind);
+            Assert.AreEqual(PaywallBlockKind.Unknown, doc.Screens[1][4].Kind);
+            Assert.AreEqual(1, doc.Blocks.Count);
+            Assert.AreEqual(BlockAction.None, doc.Blocks[0].Action);
+
+            var single = PaywallBlockDoc.Parse(RevnixJson.Parse(@"{ ""blocks"": [ { ""id"": ""a"", ""type"": ""text"" } ] }"));
+            Assert.AreEqual(0, single.Screens.Count);
+        }
+
+        [Test]
+        public void LocalizesScreenBlocks()
+        {
+            var source = PaywallBlockDoc.Parse(RevnixJson.Parse(OnboardingJson));
+            var doc = RevnixLocale.Localize(source, "es");
+            Assert.AreEqual("Bienvenido", doc.Screens[0][0].Text);
+            Assert.AreEqual("Continuar", doc.Screens[0][1].Label);
+            Assert.AreEqual("Welcome", source.Screens[0][0].Text);
+        }
+
+        [Test]
+        public void HasCloseActionLooksAtOneScreen()
+        {
+            var doc = PaywallBlockDoc.Parse(RevnixJson.Parse(OnboardingJson));
+            Assert.IsTrue(RevnixPaywallClose.HasCloseAction(doc.Screens[0]));
+            Assert.IsFalse(RevnixPaywallClose.HasCloseAction(doc.Screens[1]));
+            Assert.IsFalse(RevnixPaywallClose.HasCloseAction(doc.Blocks));
+        }
     }
 }

@@ -81,6 +81,16 @@ namespace Revnix.Unity.UI
         /// none.</summary>
         public Action OnClose;
 
+        /// <summary>Which screen to draw: an index into
+        /// <see cref="PaywallBlockDoc.Screens"/>, or its count for the
+        /// paywall itself.</summary>
+        public int ScreenIndex;
+
+        /// <summary>Shows another screen by <see cref="ScreenIndex"/>. Null
+        /// skips the intro screens: a host that cannot navigate opens on the
+        /// paywall, like an SDK that predates them.</summary>
+        public Action<int> OnNavigate;
+
         /// <summary>Where the renderer reports a paint string it could not
         /// read. Local only — it never leaves the device. The screen still
         /// draws (a fill falls back to a colour from the design), so this is
@@ -110,10 +120,15 @@ namespace Revnix.Unity.UI
         /// Null only when nothing is offered.</summary>
         private readonly string _selected;
 
+        private readonly int _screen;
+
         public RevnixPaywallBlockRenderer(BlockRenderContext ctx)
         {
             _ctx = ctx;
             _doc = ctx.Doc;
+            _screen = ctx.OnNavigate == null
+                ? _doc.Screens.Count
+                : Math.Max(0, Math.Min(ctx.ScreenIndex, _doc.Screens.Count));
             _selected = RevnixPaywallSelection.ResolveSelectedPackageId(
                 ctx.Packages, ctx.SelectedPackageId, null, null);
         }
@@ -211,7 +226,7 @@ namespace Revnix.Unity.UI
                 sizer.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
             }
 
-            foreach (var block in _doc.Blocks)
+            foreach (var block in CurrentBlocks)
             {
                 BlockStyle style;
                 var rendered = Render(block, body.transform, null, out style);
@@ -228,7 +243,28 @@ namespace Revnix.Unity.UI
             // close keeps its tap size and its distance from the screen edge
             // whatever the device width does to the design (REV-252).
             BuildFallbackClose(screen.transform);
+            BuildScreenDots(IsCanvas ? body.transform : screen.transform);
             return screen;
+        }
+
+        private List<PaywallBlock> CurrentBlocks =>
+            _screen < _doc.Screens.Count ? _doc.Screens[_screen] : _doc.Blocks;
+
+        private void BuildScreenDots(Transform parent)
+        {
+            if (_screen >= _doc.Screens.Count) return;
+            var dots = NewUI("ScreenDots", parent);
+            var dotsRt = (RectTransform)dots.transform;
+            var top = new Vector2(0.5f, 1f);
+            dotsRt.anchorMin = top;
+            dotsRt.anchorMax = top;
+            dotsRt.pivot = top;
+            dotsRt.anchoredPosition = new Vector2(0f, -20f);
+            if (!IsCanvas) dots.AddComponent<RevnixSafeAreaInset>().Margin = 20f;
+            var other = Color(_doc.TextColor, UnityEngine.Color.white);
+            other.a *= 0.3f;
+            DrawDots(dotsRt, _doc.Screens.Count + 1, _screen,
+                Color(_doc.Accent, UnityEngine.Color.white), other);
         }
 
         /// <summary>
@@ -246,7 +282,7 @@ namespace Revnix.Unity.UI
         private void BuildFallbackClose(Transform parent)
         {
             var onClose = _ctx.OnClose;
-            if (onClose == null || RevnixPaywallClose.HasCloseAction(_doc.Blocks)) return;
+            if (onClose == null || RevnixPaywallClose.HasCloseAction(CurrentBlocks)) return;
 
             var ink = Color(_doc.TextColor, UnityEngine.Color.white);
             var go = NewUI("RevnixFallbackClose", parent);
@@ -326,9 +362,9 @@ namespace Revnix.Unity.UI
             switch (block.Kind)
             {
                 case PaywallBlockKind.Text:
-                    return CloseOnTap(RenderText(block, parent, resolved.TagPackage), block.Action);
+                    return ActOnTap(RenderText(block, parent, resolved.TagPackage), block.Action);
                 case PaywallBlockKind.Image:
-                    return CloseOnTap(
+                    return ActOnTap(
                         RenderImage(
                             block,
                             parent,
@@ -690,6 +726,7 @@ namespace Revnix.Unity.UI
             // accented thing on the screen, or a "Not now" competes with
             // "Subscribe" for the eye.
             var closes = block.Action == BlockAction.Close && _ctx.OnClose != null;
+            var navigates = block.Action == BlockAction.Next || block.Action == BlockAction.Back;
             var buttonGradients = FillGradients(block.Style?.Fill);
             image.color = FillColor(
                 block.Style?.Fill,
@@ -706,12 +743,12 @@ namespace Revnix.Unity.UI
             button.transition = Selectable.Transition.None;
             button.targetGraphic = image;
             go.AddComponent<RevnixPaywallPressOpacity>();
-            if (closes)
+            var tap = TapHandler(block.Action);
+            if (tap != null)
             {
-                var onClose = _ctx.OnClose;
-                button.onClick.AddListener(() => onClose());
+                button.onClick.AddListener(() => tap());
             }
-            else
+            else if (!navigates)
             {
                 var selected = _selected;
                 if (selected != null && _ctx.OnPurchase != null)
@@ -736,7 +773,7 @@ namespace Revnix.Unity.UI
             text.alignment = TextAnchor.MiddleCenter;
             text.raycastTarget = false;
 
-            if (_ctx.Loading && !closes)
+            if (_ctx.Loading && !closes && !navigates)
             {
                 // Loading: the purchase button goes inert, its label gives
                 // way to a spinner in the same ink, and it keeps its size and
@@ -930,18 +967,10 @@ namespace Revnix.Unity.UI
             return go;
         }
 
-        /// <summary>
-        /// Makes an element the paywall's dismiss target when the design marks
-        /// it as one (REV-252), and returns it either way.
-        ///
-        /// A block with no close action gets no Button at all, so it never
-        /// intercepts a tap meant for what sits behind it. Like
-        /// <see cref="MakeSelectable"/>, an element with no art of its own
-        /// needs a transparent raycast target or the tap falls through.
-        /// </summary>
-        private GameObject CloseOnTap(GameObject go, BlockAction action)
+        private GameObject ActOnTap(GameObject go, BlockAction action)
         {
-            if (go == null || action != BlockAction.Close || _ctx.OnClose == null) return go;
+            var tap = TapHandler(action);
+            if (go == null || tap == null) return go;
             var target = go.GetComponent<Graphic>();
             if (target == null)
             {
@@ -954,9 +983,26 @@ namespace Revnix.Unity.UI
             var button = go.AddComponent<Button>();
             button.transition = Selectable.Transition.None;
             button.targetGraphic = target;
-            var onClose = _ctx.OnClose;
-            button.onClick.AddListener(() => onClose());
+            button.onClick.AddListener(() => tap());
             return go;
+        }
+
+        private Action TapHandler(BlockAction action)
+        {
+            switch (action)
+            {
+                case BlockAction.Close: return _ctx.OnClose;
+                case BlockAction.Next: return Navigate(_screen + 1);
+                case BlockAction.Back: return Navigate(_screen - 1);
+                default: return null;
+            }
+        }
+
+        private Action Navigate(int index)
+        {
+            var onNavigate = _ctx.OnNavigate;
+            if (onNavigate == null || _screen >= _doc.Screens.Count || index < 0) return null;
+            return () => onNavigate(index);
         }
 
         /// <summary>
@@ -1197,12 +1243,17 @@ namespace Revnix.Unity.UI
             dotsRt.anchorMin = bottom;
             dotsRt.anchorMax = bottom;
             dotsRt.pivot = bottom;
-            dotsRt.sizeDelta = new Vector2(count * 12f - 6f, 6f);
             dotsRt.anchoredPosition = new Vector2(0f, 8f);
-            carousel.Dots = new Image[count];
+            carousel.Dots = DrawDots(dotsRt, count, -1, carousel.Current, carousel.Other);
+        }
+
+        private static Image[] DrawDots(RectTransform row, int count, int active, Color current, Color other)
+        {
+            row.sizeDelta = new Vector2(count * 12f - 6f, 6f);
+            var images = new Image[count];
             for (var i = 0; i < count; i++)
             {
-                var dot = NewUI("Dot", dots.transform);
+                var dot = NewUI("Dot", row);
                 var dotRt = (RectTransform)dot.transform;
                 var left = new Vector2(0f, 0.5f);
                 dotRt.anchorMin = left;
@@ -1212,10 +1263,11 @@ namespace Revnix.Unity.UI
                 dotRt.anchoredPosition = new Vector2(i * 12f, 0f);
                 var image = dot.AddComponent<Image>();
                 image.sprite = RevnixPaywallSprites.Circle();
-                image.color = carousel.Other;
+                image.color = i == active ? current : other;
                 image.raycastTarget = false;
-                carousel.Dots[i] = image;
+                images[i] = image;
             }
+            return images;
         }
 
         /// <summary>
@@ -1842,12 +1894,6 @@ namespace Revnix.Unity.UI
         }
     }
 
-    /// <summary>
-    /// Keeps the fallback close chip below the status bar: its anchored
-    /// position is <c>(-Margin, -(Margin + safeAreaTop))</c> in canvas units,
-    /// re-evaluated as the safe area changes (a rotation). A world-space
-    /// canvas has no screen to be safe from, so it keeps the plain margin.
-    /// </summary>
     internal sealed class RevnixSafeAreaInset : MonoBehaviour
     {
         public float Margin = 14f;
@@ -1871,7 +1917,8 @@ namespace Revnix.Unity.UI
                 Screen.height, safe.y, safe.height, factor);
             if (Mathf.Approximately(inset, _applied)) return;
             _applied = inset;
-            ((RectTransform)transform).anchoredPosition = new Vector2(-Margin, -(Margin + inset));
+            var rt = (RectTransform)transform;
+            rt.anchoredPosition = new Vector2(rt.anchoredPosition.x, -(Margin + inset));
         }
     }
 

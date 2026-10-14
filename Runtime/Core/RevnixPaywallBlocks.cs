@@ -417,6 +417,12 @@ namespace Revnix
 
         /// <summary>Tapping the block dismisses the paywall.</summary>
         Close,
+
+        /// <summary>Tapping the block shows the following screen.</summary>
+        Next,
+
+        /// <summary>Tapping the block shows the previous screen.</summary>
+        Back,
     }
 
     /// <summary>One entry of a list block.</summary>
@@ -593,6 +599,11 @@ namespace Revnix
         public string FontFamily;
         public List<PaywallBlock> Blocks = new List<PaywallBlock>();
 
+        /// <summary>Intro screens shown in order before <see cref="Blocks"/>,
+        /// which is always the last screen. Empty for a single-screen
+        /// paywall.</summary>
+        public List<List<PaywallBlock>> Screens = new List<List<PaywallBlock>>();
+
         /// <summary>
         /// REV-271: the design's translations. Empty for a paywall published
         /// in one language, which is every paywall written before this shipped
@@ -639,6 +650,13 @@ namespace Revnix
             doc.BackgroundSpec = backgroundSpec;
             doc.Background = RevnixBackground.Ground(backgroundSpec) ?? "#000000";
             foreach (var item in list) doc.Blocks.Add(ParseBlock(item));
+            foreach (var raw in RevnixJson.GetList(map, "screens"))
+            {
+                if (!(raw is List<object> entries) || entries.Count == 0) continue;
+                var screen = new List<PaywallBlock>();
+                foreach (var item in entries) screen.Add(ParseBlock(item));
+                doc.Screens.Add(screen);
+            }
             return doc;
         }
 
@@ -658,11 +676,7 @@ namespace Revnix
                     || visibility == RevnixPaywallSelection.VisibilityUnselected
                     ? visibility
                     : null,
-                // An action this SDK does not know stays None, leaving the
-                // element inert rather than discarding the block.
-                Action = RevnixJson.GetString(map, "action") == "close"
-                    ? BlockAction.Close
-                    : BlockAction.None,
+                Action = ParseAction(RevnixJson.GetString(map, "action")),
             };
             switch (RevnixJson.GetString(map, "type"))
             {
@@ -761,6 +775,17 @@ namespace Revnix
                     break;
             }
             return block;
+        }
+
+        private static BlockAction ParseAction(string action)
+        {
+            switch (action)
+            {
+                case "close": return BlockAction.Close;
+                case "next": return BlockAction.Next;
+                case "back": return BlockAction.Back;
+                default: return BlockAction.None;
+            }
         }
     }
 

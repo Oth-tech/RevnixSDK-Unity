@@ -4,6 +4,10 @@ All notable changes to this package. The format follows [Keep a Changelog](https
 
 ## Unreleased
 
+### Added
+
+- Paywall blocks: onboarding `screens` shown in order before the paywall, with `next` / `back` tap actions and progress dots. A document without `screens` renders as before.
+
 ## 1.7.0 (2026-10-13)
 
 ### Added

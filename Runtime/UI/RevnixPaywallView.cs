@@ -121,6 +121,7 @@ namespace Revnix.Unity.UI
         private readonly DateTime _displayedAt = DateTime.UtcNow;
         private readonly Dictionary<string, int> _carouselPages = new Dictionary<string, int>();
         private readonly Dictionary<string, double> _videoPositions = new Dictionary<string, double>();
+        private int _screenIndex;
 
         /// <summary>Whether the view drew a designed (block) paywall.</summary>
         private bool _blockPaywall;
@@ -410,6 +411,12 @@ namespace Revnix.Unity.UI
                     OnTerms = _options.OnTerms,
                     OnPrivacy = _options.OnPrivacy,
                     OnClose = _options.OnClose == null ? null : (Action)CloseAndReport,
+                    ScreenIndex = _screenIndex,
+                    OnNavigate = index =>
+                    {
+                        _screenIndex = index;
+                        RebuildBlocks();
+                    },
                     OnDiagnostic = RenderDiagnostic(),
                     Font = _font,
                 }).Build(transform);

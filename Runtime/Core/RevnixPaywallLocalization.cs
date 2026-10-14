@@ -248,6 +248,8 @@ namespace Revnix
 
             var copy = doc.ShallowCopy();
             copy.Blocks = LocalizeAll(doc.Blocks, lookup);
+            copy.Screens = new List<List<PaywallBlock>>();
+            foreach (var screen in doc.Screens) copy.Screens.Add(LocalizeAll(screen, lookup));
             copy.Localization = new PaywallLocalization { DefaultLocale = chain[0], Tables = tables };
             return copy;
         }

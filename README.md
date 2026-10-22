@@ -58,13 +58,13 @@ openupm add com.revnix.sdk
 Or, in Unity, open **Window → Package Manager → + → Add package from git URL** and paste:
 
 ```
-https://github.com/Oth-tech/RevnixSDK-Unity.git#v1.8.0
+https://github.com/Oth-tech/RevnixSDK-Unity.git#v1.9.0
 ```
 
 Or add it to `Packages/manifest.json`:
 
 ```json
-"com.revnix.sdk": "https://github.com/Oth-tech/RevnixSDK-Unity.git#v1.8.0"
+"com.revnix.sdk": "https://github.com/Oth-tech/RevnixSDK-Unity.git#v1.9.0"
 ```
 
 The Unity IAP bridge switches on by itself when `com.unity.purchasing` is in the project. Read the [installation guide](https://www.revnix.io/docs/unity/installation) and [configuration reference](https://www.revnix.io/docs/unity/configuration) to set up the package.

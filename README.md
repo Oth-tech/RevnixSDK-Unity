@@ -49,7 +49,13 @@ Revnix SDK makes subscriptions, paywalls and attribution for Unity fast and easy
 
 ## Getting Started
 
-In Unity, open **Window → Package Manager → + → Add package from git URL** and paste:
+With the [OpenUPM CLI](https://openupm.com/packages/com.revnix.sdk/):
+
+```
+openupm add com.revnix.sdk
+```
+
+Or, in Unity, open **Window → Package Manager → + → Add package from git URL** and paste:
 
 ```
 https://github.com/Oth-tech/RevnixSDK-Unity.git#v1.8.0

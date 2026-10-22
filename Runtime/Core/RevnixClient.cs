@@ -210,6 +210,40 @@ namespace Revnix
             if (cancel != null) cancel();
         }
 
+        private static readonly HashSet<string> AttributionQueryParams = new HashSet<string>
+        {
+            "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+            "pid", "source", "af_channel", "medium", "c", "campaign", "term",
+            "af_ad", "content", "gclid", "gbraid", "wbraid", "ttclid", "sccid",
+            "twclid", "revnix_link", "web_id", "utm_id", "campaign_id",
+        };
+
+        private static readonly Regex UserinfoRe = new Regex(@"^([A-Za-z][A-Za-z0-9+.-]*://)[^/\\]*@");
+
+        public static string SanitizeDeepLinkUrl(string url)
+        {
+            url = url.Trim();
+            var hash = url.IndexOf('#');
+            if (hash >= 0) url = url.Substring(0, hash);
+            var query = "";
+            var q = url.IndexOf('?');
+            if (q >= 0)
+            {
+                query = url.Substring(q + 1);
+                url = url.Substring(0, q);
+            }
+            url = UserinfoRe.Replace(url, "$1");
+            var kept = query.Split('&').Where(pair =>
+            {
+                var eq = pair.IndexOf('=');
+                var name = eq >= 0 ? pair.Substring(0, eq) : pair;
+                try { name = Uri.UnescapeDataString(name); } catch (UriFormatException) { }
+                return AttributionQueryParams.Contains(name.ToLowerInvariant());
+            }).ToArray();
+            var result = kept.Length > 0 ? url + "?" + string.Join("&", kept) : url;
+            return result.Length > 1024 ? result.Substring(0, 1024) : result;
+        }
+
         /// <summary>
         /// REV-272: hand the SDK the URL that opened your game, from wherever
         /// you already receive it (<c>Application.deepLinkActivated</c>,
@@ -239,7 +273,7 @@ namespace Revnix
             StoreLastDeepLink(url);
             var extra = new Dictionary<string, object>
             {
-                ["url"] = url.Length > 1024 ? url.Substring(0, 1024) : url,
+                ["url"] = SanitizeDeepLinkUrl(url),
             };
             var batch = _launchBatch;
             var present = batch == null || !(await batch);

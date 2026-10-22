@@ -42,8 +42,8 @@ public class QuickStart : MonoBehaviour
             Debug.Log("placement unavailable: " + err.Code);
         }
 
-        // After a Unity IAP purchase completes, register it:
-        //   var result = await RevnixUnityIap.Register(revnix, product);
+        // In OnPurchasePending (Unity IAP 5), register the order:
+        //   var result = await RevnixUnityIap.Register(revnix, order);
         //   if (result != null)
         //       await revnix.WaitForEntitlements(result.Seq); // read-your-writes unlock
         // (Without Unity IAP, build a RegisterPurchaseInput by hand.)

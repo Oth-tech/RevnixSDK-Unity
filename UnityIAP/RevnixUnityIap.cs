@@ -28,8 +28,15 @@ namespace Revnix.Unity.IAP
     /// </summary>
     public static class RevnixUnityIap
     {
+        const string OrderPath = "Register the Order from OnPurchasePending instead: only the Order carries Apple's signed transaction, so iOS purchases are verified immediately.";
+
+        static bool _warnedUnprovenApple;
+
         /// <summary>Build the registration input for a purchased product, or
         /// null when the receipt is missing/unparseable (nothing to claim).</summary>
+#if REVNIX_UNITY_IAP_5
+        [Obsolete(OrderPath)]
+#endif
         public static RegisterPurchaseInput InputFrom(Product product)
             => product == null ? null : FromReceipt(product.receipt, product.definition?.storeSpecificId);
 
@@ -37,6 +44,9 @@ namespace Revnix.Unity.IAP
         /// transient failure the claim is already queued durably (retried by
         /// RetryPendingPurchases / the next Configure), so callers may treat a
         /// null return as "recorded eventually".</summary>
+#if REVNIX_UNITY_IAP_5
+        [Obsolete(OrderPath)]
+#endif
         public static Task<RegisterPurchaseResult> Register(RevnixClient client, Product product)
             => Send(client, InputFrom(product));
 
@@ -132,6 +142,12 @@ namespace Revnix.Unity.IAP
                     // fall back to TransactionID (Unity sets it to the token)
                 }
                 return RegisterPurchaseInput.Google(token, productId);
+            }
+
+            if (!_warnedUnprovenApple)
+            {
+                _warnedUnprovenApple = true;
+                UnityEngine.Debug.LogWarning("[Revnix] Apple purchase registered without Apple's signed transaction (a Unity IAP 4 Product, or an Order with no jwsRepresentation): it stays provisional until Apple confirms it, and apps with Require purchase proof reject it. Use Unity IAP 5 and RevnixUnityIap.Register(client, order).");
             }
 
             return new RegisterPurchaseInput

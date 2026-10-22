@@ -7,6 +7,8 @@ All notable changes to this package. The format follows [Keep a Changelog](https
 ### Changed
 
 - `HandleDeepLink` reports only scheme, host, path and known attribution query params (utm_*, campaign_id, pid, gclid, gbraid, wbraid, ttclid, sccid, twclid, revnix_link, web_id and similar). Other query params, the fragment and credentials are dropped before upload. `ResolveDeepLink` still sends the full URL.
+- Unity IAP 5: `RevnixUnityIap.Register(client, product)` and `InputFrom(product)` are marked `[Obsolete]` (a compiler warning) in favour of the `Order` overloads, which send Apple's signed transaction so iOS purchases are verified on arrival.
+- An Apple purchase registered without the signed transaction (a Unity IAP 4 `Product`, or an `Order` with no `jwsRepresentation`) logs one warning per session: it stays provisional until Apple confirms it, and apps with Require purchase proof reject it. Registration itself is unchanged.
 
 ## 1.8.0 (2026-10-14)
 

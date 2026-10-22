@@ -94,7 +94,7 @@ Your API key and deployment URL are in the dashboard under Settings. See [API ke
 
 **Unity IAP shows the store sheet. Revnix does everything after it.**
 
-- `RevnixUnityIap.Register(revnix, order)` sends the purchase with its StoreKit 2 proof, so iOS purchases are verified immediately. On Unity IAP 4.x, pass the purchased `Product` instead.
+- `RevnixUnityIap.Register(revnix, order)` sends the purchase with its StoreKit 2 proof, so iOS purchases are verified immediately. On Unity IAP 4.x, pass the purchased `Product` instead: its Apple purchases carry no signed transaction, stay provisional, and log a one-time warning. On Unity IAP 5 the `Product` overloads are obsolete.
 - `WaitForEntitlements(seq)` waits until the purchase is on the ledger, so the unlock is instant.
 - Entitlements and placements are cached on device, so paid players stay unlocked offline.
 - Failed registrations are queued durably and retried on the next launch.

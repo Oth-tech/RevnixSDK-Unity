@@ -664,6 +664,18 @@ namespace Revnix
             return minted;
         }
 
+        /// <summary>Adopt <paramref name="userId"/> as this device's customer id
+        /// locally (no network call); your backend merges history via
+        /// <c>POST /v1/identify</c>. Empty or over 200 chars is ignored.</summary>
+        public string Identify(string userId)
+        {
+            var current = CustomerId();
+            var trimmed = userId == null ? "" : userId.Trim();
+            if (trimmed.Length == 0 || trimmed.Length > 200) return current;
+            _config.Storage.Set(KeyCustomerId, trimmed);
+            return trimmed;
+        }
+
         /// <summary>Fresh anonymous identity. Call at sign-out, or the next
         /// user inherits the previous one's cached entitlements. Per-customer
         /// caches age out via LRU.</summary>

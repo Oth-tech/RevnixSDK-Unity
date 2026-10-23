@@ -4,6 +4,10 @@ All notable changes to this package. The format follows [Keep a Changelog](https
 
 ## Unreleased
 
+### Added
+
+- `string Identify(string userId)`: adopts the given customer id on the device with no network call. Trims the id; an empty id or one over 200 characters is ignored and the current id is returned. Your backend must still call `POST /v1/identify` with a secret key to merge the anonymous history.
+
 ## 1.9.0 (2026-10-22)
 
 ### Changed

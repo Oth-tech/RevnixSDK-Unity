@@ -7,7 +7,9 @@ namespace Revnix
     {
         /// <summary>Publishable key (`rvx_pk_live_…` / `rvx_pk_test_…`). The key
         /// fixes app + environment server-side. Secret keys never ship in a
-        /// binary — identify / alias are server-proxied by design.</summary>
+        /// binary, so merging history is server-side (<c>POST /v1/identify</c>
+        /// with a secret key); <c>Identify</c> only adopts the id on this
+        /// device. alias stays server-only.</summary>
         public string ApiKey;
 
         /// <summary>e.g. `https://your-deployment.convex.site`</summary>

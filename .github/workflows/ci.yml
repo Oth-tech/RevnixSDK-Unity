@@ -24,37 +24,71 @@ jobs:
   # The dotnet job above only sees Runtime/Core. This one opens the package in
   # a real Unity Editor, so Runtime/Unity, Runtime/UI and the Unity IAP bridge
   # compile too, and the Editor tests run under Unity's own NUnit. One cell per
-  # Unity IAP major: 4 on the oldest supported editor, 5 on the newest LTS that
-  # its current release needs.
+  # Unity IAP major, both on the same editor (IAP 4 supports it).
+  #
+  # It runs on the Mac mini, not in GameCI's docker image: Unity's licensing
+  # service rejects a Unity Personal .ulf from the cloud ("TimeStamp validation
+  # failed", game-ci/unity-test-runner#336, open since 13 Oct 2026), while the
+  # editor installed through Unity Hub on the runner is activated for good.
+  # Install the version below through Unity Hub on the runner once; the job
+  # says so when it is missing.
   unity:
     name: unity (${{ matrix.unity }}, IAP ${{ matrix.iap }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - unity: 2021.3.45f2
-            iap: 4.15.1
-          - unity: 2022.3.62f2
-            iap: 5.4.4
+        unity: [2022.3.62f2]
+        iap: [4.15.1, 5.4.4]
+    env:
+      UNITY: /Applications/Unity/Hub/Editor/${{ matrix.unity }}/Unity.app/Contents/MacOS/Unity
+      PROJECT: .github/ci/UnityProject
     steps:
       - uses: actions/checkout@v4
 
-      - name: Pin this cell's editor and Unity IAP
-        working-directory: .github/ci/UnityProject
+      - name: Unity ${{ matrix.unity }} is installed on this runner
         run: |
-          mkdir -p Assets ProjectSettings
-          printf 'm_EditorVersion: %s\n' "${{ matrix.unity }}" > ProjectSettings/ProjectVersion.txt
-          jq --arg v "${{ matrix.iap }}" '.dependencies["com.unity.purchasing"] = $v' Packages/manifest.json > manifest.tmp
-          mv manifest.tmp Packages/manifest.json
+          if [ ! -x "$UNITY" ]; then
+            echo "::error::Unity ${{ matrix.unity }} is not installed on $(hostname). Install it through Unity Hub (Installs → Install Editor → Archive → ${{ matrix.unity }}) and keep the Personal license activated there."
+            exit 1
+          fi
 
-      - uses: game-ci/unity-test-runner@v4
-        env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      - name: Pin this cell's editor and Unity IAP
+        run: |
+          mkdir -p "$PROJECT/Assets" "$PROJECT/ProjectSettings"
+          printf 'm_EditorVersion: %s\n' "${{ matrix.unity }}" > "$PROJECT/ProjectSettings/ProjectVersion.txt"
+          node -e '
+            const fs = require("fs");
+            const path = process.argv[1] + "/Packages/manifest.json";
+            const manifest = JSON.parse(fs.readFileSync(path, "utf8"));
+            manifest.dependencies["com.unity.purchasing"] = process.argv[2];
+            fs.writeFileSync(path, JSON.stringify(manifest, null, 2) + "\n");
+          ' "$PROJECT" "${{ matrix.iap }}"
+
+      - name: Compile the package and run the Editor tests
+        run: |
+          "$UNITY" -batchmode -nographics \
+            -projectPath "$PROJECT" \
+            -runTests -testPlatform EditMode \
+            -testResults "$RUNNER_TEMP/unity-tests.xml" \
+            -logFile "$RUNNER_TEMP/unity.log"
+
+      - name: Test summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/unity-tests.xml" ]; then
+            head -c 2000 "$RUNNER_TEMP/unity-tests.xml" | grep -o '<test-run [^>]*' | grep -oE '(testcasecount|total|passed|failed|skipped)="[0-9]+"' | tr '\n' ' '; echo
+          fi
+          grep -E 'error CS[0-9]+|Scripts have compiler errors|Assembly .* will not be loaded' "$RUNNER_TEMP/unity.log" | head -40 || true
+
+      - name: Upload Unity log and results
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
-          projectPath: .github/ci/UnityProject
-          unityVersion: ${{ matrix.unity }}
-          testMode: EditMode
+          name: unity-${{ matrix.unity }}-iap-${{ matrix.iap }}
+          path: |
+            ${{ runner.temp }}/unity.log
+            ${{ runner.temp }}/unity-tests.xml
+          retention-days: 14

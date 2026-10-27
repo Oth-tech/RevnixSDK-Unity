@@ -20,3 +20,41 @@ jobs:
 
       - name: Test
         run: dotnet test .github/ci/Revnix.Sdk.Tests.csproj
+
+  # The dotnet job above only sees Runtime/Core. This one opens the package in
+  # a real Unity Editor, so Runtime/Unity, Runtime/UI and the Unity IAP bridge
+  # compile too, and the Editor tests run under Unity's own NUnit. One cell per
+  # Unity IAP major: 4 on the oldest supported editor, 5 on the newest LTS that
+  # its current release needs.
+  unity:
+    name: unity (${{ matrix.unity }}, IAP ${{ matrix.iap }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - unity: 2021.3.45f2
+            iap: 4.15.1
+          - unity: 2022.3.62f2
+            iap: 5.4.4
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pin this cell's editor and Unity IAP
+        working-directory: .github/ci/UnityProject
+        run: |
+          mkdir -p Assets ProjectSettings
+          printf 'm_EditorVersion: %s\n' "${{ matrix.unity }}" > ProjectSettings/ProjectVersion.txt
+          jq --arg v "${{ matrix.iap }}" '.dependencies["com.unity.purchasing"] = $v' Packages/manifest.json > manifest.tmp
+          mv manifest.tmp Packages/manifest.json
+
+      - uses: game-ci/unity-test-runner@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: .github/ci/UnityProject
+          unityVersion: ${{ matrix.unity }}
+          testMode: EditMode

@@ -5,6 +5,10 @@
   "description": "Revnix subscriptions and entitlements for Unity: offline-resilient entitlement checks, placements, purchase registration with a durable retry queue, and an optional Unity IAP bridge.",
   "unity": "2021.3",
   "dependencies": {
+    "com.unity.ugui": "1.0.0",
+    "com.unity.modules.androidjni": "1.0.0",
+    "com.unity.modules.unitywebrequest": "1.0.0",
+    "com.unity.modules.unitywebrequesttexture": "1.0.0",
     "com.unity.modules.video": "1.0.0"
   },
   "documentationUrl": "https://www.revnix.io/docs/unity",

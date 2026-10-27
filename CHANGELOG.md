@@ -4,6 +4,10 @@ All notable changes to this package. The format follows [Keep a Changelog](https
 
 ## Unreleased
 
+### Fixed
+
+- `package.json` now declares every Unity package and module the SDK compiles against: `com.unity.ugui` (the paywall view), `com.unity.modules.unitywebrequest` and `com.unity.modules.unitywebrequesttexture` (network calls and paywall images) and `com.unity.modules.androidjni` (Android device facts). A project that had removed one of them got compile errors in the SDK; the Package Manager now adds it back instead.
+
 ## 1.10.0 (2026-10-23)
 
 ### Added

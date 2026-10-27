@@ -4,3 +4,6 @@
 !/.github/ci/*.csproj
 obj/
 bin/
+/.github/ci/UnityProject/*
+!/.github/ci/UnityProject/Packages/
+/.github/ci/UnityProject/Packages/packages-lock.json

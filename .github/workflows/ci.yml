@@ -34,6 +34,9 @@ jobs:
   # says so when it is missing.
   unity:
     name: unity (${{ matrix.unity }}, IAP ${{ matrix.iap }})
+    # This repository is public (OpenUPM). Code from a fork never runs on the
+    # Mac mini: only pull requests from this repository's own branches do.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 30
     strategy:

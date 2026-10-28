@@ -7,6 +7,15 @@ using System.Threading.Tasks;
 
 namespace Revnix
 {
+    /// <summary>A product on screen when a paywall displayed.</summary>
+    public sealed class RevnixPaywallProductShown
+    {
+        public string ProductId;
+        public string PriceLabel;
+        public long? AmountMinor;
+        public string Currency;
+    }
+
     /// <summary>
     /// Core client — a faithful port of revnix-react's resilience policy
     /// (revnix-sdk `resilience.test.ts` is the behavioral spec, matching the
@@ -1351,7 +1360,10 @@ namespace Revnix
         /// not depend on the network, and the close beacon carries its own
         /// idempotency key.
         /// </summary>
-        public async Task<string> LogPaywallDisplay(string placementKey = null, string paywallId = null)
+        public async Task<string> LogPaywallDisplay(
+            string placementKey = null,
+            string paywallId = null,
+            IReadOnlyList<RevnixPaywallProductShown> productsShown = null)
         {
             var viewId = Guid.NewGuid().ToString("D").ToLowerInvariant();
             if (placementKey == RevnixImplicitPlacements.PreviewPlacementKey) return viewId;
@@ -1374,6 +1386,21 @@ namespace Revnix
             };
             if (placementKey != null) body["placementKey"] = placementKey;
             if (paywallId != null) body["paywallId"] = paywallId;
+            if (productsShown != null)
+            {
+                var shown = new List<object>();
+                foreach (var p in productsShown)
+                {
+                    if (p == null || p.ProductId == null || shown.Count >= 20) continue;
+                    var entry = new Dictionary<string, object> { ["productId"] = p.ProductId };
+                    if (p.PriceLabel != null)
+                        entry["priceLabel"] = p.PriceLabel.Length > 64 ? p.PriceLabel.Substring(0, 64) : p.PriceLabel;
+                    if (p.AmountMinor != null) entry["amountMinor"] = p.AmountMinor.Value;
+                    if (p.Currency != null) entry["currency"] = p.Currency;
+                    shown.Add(entry);
+                }
+                if (shown.Count > 0) body["productsShown"] = shown;
+            }
             try
             {
                 await Request("POST", new[] { "v1", "paywalls", "viewed" }, body);

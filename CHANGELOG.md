@@ -4,6 +4,10 @@ All notable changes to this package. The format follows [Keep a Changelog](https
 
 ## Unreleased
 
+### Added
+
+- `LogPaywallDisplay` takes an optional `productsShown` list (`RevnixPaywallProductShown`: `ProductId`, `PriceLabel`, `AmountMinor`, `Currency`) and `RevnixPaywallView` sends the products on screen with the display beacon. Capped at 20 entries and 64-character price labels; omitted when empty.
+
 ## 1.10.0 (2026-10-23)
 
 ### Added

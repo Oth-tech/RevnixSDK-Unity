@@ -181,8 +181,20 @@ namespace Revnix.Unity.UI
             // genuine new display; property updates are not (REV-094).
             if (options.Client != null && !options.DisableViewTracking)
             {
+                var productsShown = new List<RevnixPaywallProductShown>();
+                foreach (var pkg in _shown ?? new List<RevnixPaywallPackage>())
+                {
+                    if (pkg?.ProductId == null) continue;
+                    productsShown.Add(new RevnixPaywallProductShown
+                    {
+                        ProductId = pkg.ProductId,
+                        PriceLabel = pkg.PriceLabel,
+                        AmountMinor = pkg.AmountMinor,
+                        Currency = pkg.Currency,
+                    });
+                }
                 _viewReport = options.Client.LogPaywallDisplay(
-                    options.PlacementKey, options.PaywallId);
+                    options.PlacementKey, options.PaywallId, productsShown);
                 // REV-263: an offering with nothing to sell is the one failure
                 // the view can see by itself, and the one most worth knowing
                 // about — the paywall drew, the player could not buy.

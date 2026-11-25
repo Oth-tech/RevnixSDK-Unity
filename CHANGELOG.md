@@ -4,6 +4,10 @@ All notable changes to this package. The format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## 2.0.0 (2026-11-25)
+
+No SDK changes. Version moved in lockstep with revnix-app release 55ceaf4; the package contents are identical to 1.11.0.
+
 ## 1.11.0 (2026-10-29)
 
 ### Added

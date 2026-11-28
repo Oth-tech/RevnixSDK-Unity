@@ -163,5 +163,7 @@ namespace Revnix
         /// A null answer deletes a previously stored <c>gps_adid</c>; a throw
         /// or a 10 s timeout changes nothing.</summary>
         public Func<System.Threading.Tasks.Task<string>> AdvertisingId;
+
+        internal IReadOnlyList<string> EntitlementSigningKeys;
     }
 }

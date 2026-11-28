@@ -40,7 +40,7 @@ Revnix SDK makes subscriptions, paywalls and attribution for Unity fast and easy
 ## Why Revnix?
 
 - [Unity IAP bridge](https://www.revnix.io/docs/unity/make-purchases). One call registers a Unity IAP order; with Unity IAP 5 the StoreKit 2 proof travels along, so iOS purchases are verified on arrival.
-- [Entitlements that work offline](https://www.revnix.io/docs/unity/check-entitlements). Entitlement checks are cached on device, so a player who paid stays unlocked without a network.
+- [Entitlements that work offline](https://www.revnix.io/docs/unity/check-entitlements). Entitlement checks are cached on device, so a player who paid stays unlocked without a network. Responses are signed by the server and verified on device, live and from the cache, so a proxy or an edited PlayerPrefs entry cannot unlock premium.
 - [Remote paywalls](https://www.revnix.io/docs/paywall-builder). Design paywalls in the dashboard and ship copy, prices and layout changes without an app release.
 - [A/B tests and holdouts](https://www.revnix.io/docs/ab-tests). Split a placement between variants, target an audience and ship the winner from the dashboard.
 - [Attribution and deep links](https://www.revnix.io/docs/attribution). Install attribution, deferred deep links, Apple Search Ads and MMP forwarding from the same package.
@@ -96,7 +96,7 @@ Your API key and deployment URL are in the dashboard under Settings. See [API ke
 
 - `RevnixUnityIap.Register(revnix, order)` sends the purchase with its StoreKit 2 proof, so iOS purchases are verified immediately. On Unity IAP 4.x, pass the purchased `Product` instead: its Apple purchases carry no signed transaction, stay provisional, and log a one-time warning. On Unity IAP 5 the `Product` overloads are obsolete.
 - `WaitForEntitlements(seq)` waits until the purchase is on the ledger, so the unlock is instant.
-- Entitlements and placements are cached on device, so paid players stay unlocked offline.
+- Entitlements and placements are cached on device, so paid players stay unlocked offline. Entitlement responses carry an ECDSA P-256 signature the SDK checks against pinned keys; an unsigned or forged response is rejected and the last verified cache answers instead.
 - Failed registrations are queued durably and retried on the next launch.
 - No Unity IAP? Call `RegisterPurchase()` with the store token yourself.
 

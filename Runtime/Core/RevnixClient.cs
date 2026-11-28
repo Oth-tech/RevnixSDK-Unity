@@ -2,8 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+
+[assembly: InternalsVisibleTo("Revnix.Sdk.Tests")]
 
 namespace Revnix
 {
@@ -69,7 +74,16 @@ namespace Revnix
         private const string KeyEventQueue = "revnix.eventQueue";
         private const string KeyPlacementsInvalidatedAt = "revnix.placementsInvalidatedAt";
 
+        private static readonly string[] PinnedEntitlementKeys =
+        {
+            "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEsVQ+iVnl3H7IWe6uma8VASdqlJ09SrtOIKpxB5vF1xF7f3nD+SBzXlse1+skTi/jv/CLa4fUz9qGfZ4T8M+Nhw==",
+            "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEzGACMgBMy29LVcpzlmUFBRi4aiCB0FSitlLcO0k8fJ9q3foy22k2twy2U/qL0yVJHKQWWIEmt96dchyGlgDZHQ==",
+        };
+
         private readonly RevnixConfig _config;
+        private readonly RevnixP256Key[] _signingKeys;
+        private readonly string _apiKeyHash;
+        private Tuple<string, string> _verifiedCache;
         private readonly object _lock = new object();
         private readonly Random _random = new Random();
         private Task<CustomerEntitlements> _inflight;
@@ -138,6 +152,9 @@ namespace Revnix
             if (string.IsNullOrEmpty(config.BaseUrl)) throw new ArgumentException("BaseUrl is required");
             if (config.Http == null) throw new ArgumentException("Http transport is required");
             _config = config;
+            _signingKeys = (config.EntitlementSigningKeys ?? PinnedEntitlementKeys)
+                .Select(RevnixP256Key.FromSpki).Where(key => key != null).ToArray();
+            _apiKeyHash = Sha256Hex(config.ApiKey.Trim());
             SubscribeLifecycle();
             if (config.Storage.Get(KeyEventQueue) != null) StartEventFlush();
         }
@@ -753,12 +770,16 @@ namespace Revnix
         private async Task<CustomerEntitlements> FetchFreshEntitlements(
             string cid, long nowMs, int? timeoutMs = null)
         {
-            var raw = await Request(
+            var response = await Send(
                 "GET", new[] { "v1", "customers", cid, "entitlements" }, timeoutMs: timeoutMs);
-            var snapshot = DecodeEntitlements(raw);
+            if (!IsValidSignature(cid, response.Body, response.SignedAtHeader, response.SignatureHeader))
+            {
+                throw new RevnixBadResponseException("entitlements response has a missing or invalid signature");
+            }
+            var snapshot = DecodeEntitlements(response.Body);
             snapshot.Stale = false;
             snapshot.FetchedAt = nowMs;
-            StoreCacheEntry(new CacheEntry { Snapshot = snapshot, FetchedAt = nowMs }, cid);
+            StoreCacheEntry(cid, response.Body, response.SignedAtHeader, response.SignatureHeader, nowMs);
             return snapshot;
         }
 
@@ -1909,6 +1930,11 @@ namespace Revnix
         private async Task<string> Request(string method, string[] segments,
             Dictionary<string, object> body = null, Dictionary<string, string> query = null,
             Dictionary<string, string> extraHeaders = null, int? timeoutMs = null)
+            => (await Send(method, segments, body, query, extraHeaders, timeoutMs)).Body;
+
+        private async Task<RevnixHttpResponse> Send(string method, string[] segments,
+            Dictionary<string, object> body = null, Dictionary<string, string> query = null,
+            Dictionary<string, string> extraHeaders = null, int? timeoutMs = null)
         {
             var url = BuildUrl(segments, query);
             var headers = new Dictionary<string, string>
@@ -1945,7 +1971,7 @@ namespace Revnix
                 }
                 throw RevnixException.FromHttp(response.Status, message, response.RetryAfterHeader);
             }
-            return response.Body;
+            return response;
         }
 
         private string BuildUrl(string[] segments, Dictionary<string, string> query = null)
@@ -2056,12 +2082,20 @@ namespace Revnix
             try
             {
                 var map = RevnixJson.ParseObject(raw);
-                var snapshotMap = RevnixJson.GetObject(map, "snapshot");
-                if (snapshotMap == null) return null;
+                var body = RevnixJson.GetString(map, "body");
+                var signedAt = RevnixJson.GetString(map, "signedAt");
+                var fetchedAt = RevnixJson.GetNullableLong(map, "fetchedAt");
+                if (fetchedAt == null) return null;
+                var verified = _verifiedCache;
+                if (verified == null || verified.Item1 != cid || verified.Item2 != raw)
+                {
+                    if (!IsValidSignature(cid, body, signedAt, RevnixJson.GetString(map, "signature"))) return null;
+                    _verifiedCache = Tuple.Create(cid, raw);
+                }
                 return new CacheEntry
                 {
-                    Snapshot = CustomerEntitlements.FromJson(snapshotMap),
-                    FetchedAt = RevnixJson.GetLong(map, "fetchedAt"),
+                    Snapshot = CustomerEntitlements.FromJson(RevnixJson.ParseObject(body)),
+                    FetchedAt = Math.Min(fetchedAt.Value, long.Parse(signedAt, CultureInfo.InvariantCulture)),
                 };
             }
             catch (FormatException)
@@ -2070,14 +2104,47 @@ namespace Revnix
             }
         }
 
-        private void StoreCacheEntry(CacheEntry entry, string cid)
+        private bool IsValidSignature(string cid, string body, string signedAt, string signature)
         {
-            var map = new Dictionary<string, object>
+            if (body == null || signature == null ||
+                !long.TryParse(signedAt, NumberStyles.None, CultureInfo.InvariantCulture, out _))
             {
-                ["snapshot"] = entry.Snapshot.ToJson(),
-                ["fetchedAt"] = entry.FetchedAt,
-            };
-            _config.Storage.Set(CacheKey(cid), RevnixJson.Serialize(map));
+                return false;
+            }
+            byte[] der;
+            try
+            {
+                der = Convert.FromBase64String(signature);
+            }
+            catch (FormatException)
+            {
+                return false;
+            }
+            var message = Encoding.UTF8.GetBytes(
+                signedAt + "." + _apiKeyHash + "." + Sha256Hex(cid) + "." + body);
+            return _signingKeys.Any(key => key.Verify(message, der));
+        }
+
+        private static string Sha256Hex(string value)
+        {
+            byte[] digest;
+            using (var sha = SHA256.Create()) digest = sha.ComputeHash(Encoding.UTF8.GetBytes(value));
+            var hex = new StringBuilder(digest.Length * 2);
+            foreach (var b in digest) hex.Append(b.ToString("x2", CultureInfo.InvariantCulture));
+            return hex.ToString();
+        }
+
+        private void StoreCacheEntry(string cid, string body, string signedAt, string signature, long fetchedAt)
+        {
+            var raw = RevnixJson.Serialize(new Dictionary<string, object>
+            {
+                ["body"] = body,
+                ["signedAt"] = signedAt,
+                ["signature"] = signature,
+                ["fetchedAt"] = fetchedAt,
+            });
+            _config.Storage.Set(CacheKey(cid), raw);
+            _verifiedCache = Tuple.Create(cid, raw);
 
             // LRU over recent customers so a shared device can't grow unbounded.
             var index = ReadIndex();

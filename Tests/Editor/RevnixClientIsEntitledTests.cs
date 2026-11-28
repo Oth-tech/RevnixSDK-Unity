@@ -11,6 +11,12 @@ namespace Revnix.Tests
             "{\"customerId\":\"cus_1\",\"cursor\":7,\"entitlements\":[" +
             "{\"entitlementId\":\"pro\",\"isActive\":true,\"sources\":[]}]}";
 
+        private const string CustomerId = "cus_1";
+        private const long Now = 1_700_000_000_000L;
+        private static readonly TestSigningKey Key = new TestSigningKey();
+
+        private static RevnixHttpResponse Signed(string body) => Key.Response(body, CustomerId, Now);
+
         private class FakeHttp : IRevnixHttp
         {
             private readonly Queue<RevnixHttpResponse> _responses;
@@ -30,12 +36,17 @@ namespace Revnix.Tests
 
         private static RevnixClient MakeClient(IRevnixHttp http)
         {
+            var storage = new MemoryStorage();
+            storage.Set("revnix.customerId", CustomerId);
             var config = new RevnixConfig
             {
-                ApiKey = "rvx_pk_test",
+                ApiKey = TestSigningKey.ApiKey,
                 BaseUrl = "https://x",
                 Http = http,
+                Storage = storage,
+                Now = () => Now,
                 EntitlementsTtl = System.TimeSpan.Zero,
+                EntitlementSigningKeys = new[] { Key.Spki },
             };
             return new RevnixClient(config);
         }
@@ -44,7 +55,7 @@ namespace Revnix.Tests
         public void IsEntitledAnswersFalseForARevokedKeyEvenWithAnActiveEntitlementCached()
         {
             var http = new FakeHttp(
-                new RevnixHttpResponse(200, EntitlementsBody),
+                Signed(EntitlementsBody),
                 new RevnixHttpResponse(401, "{\"error\":\"revoked\"}"));
             var client = MakeClient(http);
 
@@ -58,7 +69,7 @@ namespace Revnix.Tests
         public void IsEntitledStillServesTheCacheOnATransientFailure()
         {
             var http = new FakeHttp(
-                new RevnixHttpResponse(200, EntitlementsBody),
+                Signed(EntitlementsBody),
                 new RevnixHttpResponse(503, "{\"error\":\"unavailable\"}"));
             var client = MakeClient(http);
 

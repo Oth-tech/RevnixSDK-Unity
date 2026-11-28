@@ -166,41 +166,6 @@ namespace Revnix
             }
             return snapshot;
         }
-
-        internal Dictionary<string, object> ToJson()
-        {
-            var entitlements = new List<object>();
-            foreach (var ent in Entitlements)
-            {
-                var sources = new List<object>();
-                foreach (var src in ent.Sources)
-                {
-                    var s = new Dictionary<string, object>
-                    {
-                        ["kind"] = src.Kind, ["key"] = src.Key, ["isActive"] = src.IsActive,
-                    };
-                    if (src.ExpiresAt.HasValue) s["expiresAt"] = src.ExpiresAt.Value;
-                    sources.Add(s);
-                }
-                var e = new Dictionary<string, object>
-                {
-                    ["entitlementId"] = ent.EntitlementId,
-                    ["isActive"] = ent.IsActive,
-                    ["sources"] = sources,
-                };
-                if (ent.ExpiresAt.HasValue) e["expiresAt"] = ent.ExpiresAt.Value;
-                entitlements.Add(e);
-            }
-            var map = new Dictionary<string, object>
-            {
-                ["customerId"] = CustomerId,
-                ["cursor"] = Cursor,
-                ["entitlements"] = entitlements,
-            };
-            if (Stale.HasValue) map["stale"] = Stale.Value;
-            if (FetchedAt.HasValue) map["fetchedAt"] = FetchedAt.Value;
-            return map;
-        }
     }
 
     // ——— POST /v1/purchases ———

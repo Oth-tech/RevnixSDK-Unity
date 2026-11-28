@@ -12,12 +12,21 @@ namespace Revnix
         public readonly int Status;
         public readonly string Body;
         public readonly string RetryAfterHeader;
+        public readonly string SignedAtHeader;
+        public readonly string SignatureHeader;
 
         public RevnixHttpResponse(int status, string body, string retryAfterHeader = null)
+            : this(status, body, retryAfterHeader, null, null) { }
+
+        /// <summary>Entitlement responses need <c>Revnix-Signed-At</c> and <c>Revnix-Signature</c>; without them the client rejects the response.</summary>
+        public RevnixHttpResponse(int status, string body, string retryAfterHeader,
+            string signedAtHeader, string signatureHeader)
         {
             Status = status;
             Body = body ?? "";
             RetryAfterHeader = retryAfterHeader;
+            SignedAtHeader = signedAtHeader;
+            SignatureHeader = signatureHeader;
         }
     }
 

@@ -53,6 +53,7 @@ namespace Revnix.Tests
             public readonly FakeHttp Http = new FakeHttp();
             public readonly MemoryStorage Storage = new MemoryStorage();
             public readonly List<RevnixDiagnostic> Diagnostics = new List<RevnixDiagnostic>();
+            public readonly TestSigningKey Key = new TestSigningKey();
             public long Now = 1_700_000_000_000L;
 
             public RevnixClient Client(TimeSpan? entitlementsTtl = null) => new RevnixClient(new RevnixConfig
@@ -64,6 +65,7 @@ namespace Revnix.Tests
                 Now = () => Now,
                 EntitlementsTtl = entitlementsTtl ?? TimeSpan.FromSeconds(30),
                 OnDiagnostic = d => Diagnostics.Add(d),
+                EntitlementSigningKeys = new[] { Key.Spki },
             });
         }
 
@@ -212,8 +214,9 @@ namespace Revnix.Tests
         public void EntitlementsWithACachedSnapshotUseTheShortTimeout()
         {
             var h = new Harness();
-            h.Http.Respond("/entitlements", 200, EntitlementsBody);
             var client = h.Client(TimeSpan.Zero);
+            h.Http.Routes["/entitlements"] = () =>
+                Task.FromResult(h.Key.Response(EntitlementsBody, client.CustomerId(), h.Now));
 
             Run(client.Entitlements());
             Assert.AreEqual(10_000, h.Http.Calls[h.Http.Calls.Count - 1].timeoutMs);

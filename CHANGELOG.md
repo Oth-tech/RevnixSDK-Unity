@@ -4,6 +4,17 @@ All notable changes to this package. The format follows [Keep a Changelog](https
 
 ## Unreleased
 
+Ship this release after the Revnix server signs entitlement responses (`ENTITLEMENT_SIGNING_KEY` set on the deployment). Against an unsigned server every entitlement read fails.
+
+### Added
+
+- `RevnixHttpResponse.SignedAtHeader` and `SignatureHeader`, plus a constructor that takes them. A custom `IRevnixHttp` must pass the `Revnix-Signed-At` and `Revnix-Signature` response headers through, or every entitlement read is rejected. The existing constructor is unchanged.
+
+### Changed
+
+- Entitlements are now signature-checked, like the native SDKs. The live `GET /v1/customers/{id}/entitlements` response must carry a valid `Revnix-Signature` from a pinned Revnix key; otherwise it is rejected as a retryable `RevnixBadResponseException` and the last verified cached snapshot serves (within the offline window). With no cache the call throws and `IsEntitled` is false. The check is managed C# and does not depend on the platform's `ECDsa` support.
+- The PlayerPrefs cache now stores the signed body and is re-verified on every read. Entries written by older versions are ignored, so the first offline launch after upgrading has no cache.
+
 ## 2.0.0 (2026-11-25)
 
 No SDK changes. Version moved in lockstep with revnix-app release 55ceaf4; the package contents are identical to 1.11.0.

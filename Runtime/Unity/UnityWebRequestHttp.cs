@@ -67,7 +67,9 @@ namespace Revnix.Unity
                             tcs.TrySetResult(new RevnixHttpResponse(
                                 (int)request.responseCode,
                                 request.downloadHandler.text,
-                                request.GetResponseHeader("Retry-After")));
+                                request.GetResponseHeader("Retry-After"),
+                                request.GetResponseHeader("Revnix-Signed-At"),
+                                request.GetResponseHeader("Revnix-Signature")));
                             break;
                         }
                     }
